@@ -1,34 +1,34 @@
 # Trace UI
 
 ## Installation
-Requires python3.6 or newer
 
-If running outside a venv:
+Requires python 3.6 or newer
+
+If running outside a virtual python environment:
 ```
 sudo -H pip install pyside6==6.2.4
 git clone ...
 cd traceui
 ```
 
-If using a venv:
+If using a virtual environment:
 ```
 pip install pyside6==6.2.4
 git clone ...
 cd traceui
 ```
 
-
 ## Development
 
 
 ## Running
 
-Run:
+Linux
 
 ```
-python traceui.py
+./run.sh
 ```
-Which will launch the gui, follow the onscreen instructions from there.
+Which will check for updates and then launch the gui. Follow the onscreen instructions from there.
 
 ## Outputs
 
