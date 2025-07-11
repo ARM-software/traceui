@@ -1,0 +1,18 @@
+{
+    "postprocess_options": [
+        {
+             "id": "frameselect",
+             "title": "Frame selection",
+             "default": true,
+             "tools": ["patrace", "gfxreconstruct"],
+             "desc": "Generate selected frames based on HWC"
+        },
+        {
+            "id": "fastforward",
+            "title": "Generate fastforward trace(s)",
+            "default": false,
+            "tools": ["patrace", "gfxreconstruct"],
+            "desc": "Generates fastforward trace(s) for each selected frame or framerange"
+         }
+    ]
+}
