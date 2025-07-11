@@ -3,7 +3,7 @@
 touch .cached
 mkdir -p artifacts
 
-export TRACEUI_LATEST_RELEASE="r1p0-pre"
+export TRACEUI_LATEST_RELEASE="r1p0"
 export TRACEUI_CORE_URL="https://github.com/ARM-software/traceui/releases/download"
 export TRACEUI_CACHED_VERSION=$(cat .cached)
 
