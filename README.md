@@ -18,6 +18,11 @@ git clone ...
 cd traceui
 ```
 
+In order to run fast forwarding verification, ensure to have imagemagick installed:
+```
+apt install imagemagick
+```
+
 ## Development
 
 

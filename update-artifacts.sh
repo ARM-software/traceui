@@ -3,7 +3,7 @@
 touch .cached
 mkdir -p artifacts
 
-export TRACEUI_LATEST_RELEASE="r1p0"
+export TRACEUI_LATEST_RELEASE="r1p1"
 export TRACEUI_CORE_URL="https://github.com/ARM-software/traceui/releases/download"
 export TRACEUI_CACHED_VERSION=$(cat .cached)
 
@@ -19,6 +19,6 @@ if [[ "${TRACEUI_LATEST_RELEASE}" != "$TRACEUI_CACHED_VERSION" ]]; then
 	tar xzf patrace-r5p4.tar.gz -C artifacts
 	rm -f gfxreconstruct-arm-r4p1.tar.gz hwcpipe.tar.gz patrace-r5p4.tar.gz
 
-	echo "${TRACEUI_LATEST_RELEASE}" >> .cached
+	echo "${TRACEUI_LATEST_RELEASE}" > .cached
 	echo "... done."
 fi

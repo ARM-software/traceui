@@ -1,11 +1,30 @@
 from pathlib import Path
 import os
 from core.config import ConfigSettings
-from PySide6.QtCore import Qt, Signal, QThread, QEventLoop
+from PySide6.QtCore import Qt, Signal, QEventLoop, QThread, QObject
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QLineEdit, QPushButton, QFormLayout, QScrollArea, QAbstractButton, QMessageBox
 from core.page_navigation import PageNavigation, PageIndex
-from core.widgets.trace import WorkerAdbProcess
+from core.adb_thread import AdbThread
+
+class PixMapHelper(QObject):
+    results = Signal(object)
+    finished = Signal()
+
+    def __init__(self, images):
+        super().__init__()
+        self.images = images
+
+    def makePictures(self):
+        list_imgs = []
+        for img in self.images:
+            pixmap = QPixmap(img)
+            if pixmap.isNull():
+                print(f"[ INFO ] Unable to load image: {img}")
+                continue
+            list_imgs.append(pixmap)
+        self.results.emit(list_imgs)
+        self.finished.emit()
 
 
 
@@ -77,6 +96,7 @@ class UiFrameRangeWidget(PageNavigation):
         self.frame_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.frame_scroll.setWidgetResizable(True)
         self.frame_scroll.setWidget(self.timeline_widget)
+        self.setupWidgets()
 
     def getImages(self):
         """
@@ -87,7 +107,6 @@ class UiFrameRangeWidget(PageNavigation):
         print(f"[ INFO ] Looking for images in: {search_path}")
         self.img_path = Path(search_path)
         self.images = list(self.img_path.glob('**/*.png'))
-        self.resetVisibility()
         if not self.images:
             print(f"[ INFO ] Found no images with mask: '**/*.png', trying again with **/*.bmp")
             self.images = list(self.img_path.glob('**/*.bmp'))
@@ -114,8 +133,9 @@ class UiFrameRangeWidget(PageNavigation):
 
         print("[ INFO ] Loading images...")
         QApplication.processEvents()
-        self.setupWidgets()
+        self.updatePictureWidgets()
         self.setupLayouts()
+        self.resetVisibility()
 
     def setupWidgets(self):
         """
@@ -135,14 +155,13 @@ class UiFrameRangeWidget(PageNavigation):
         self.continue_select_button.setText("Continue")
         self.continue_select_button.clicked.connect(self.frameSelect)
 
+    def updatePictureWidgets(self):
         if self.images:
             self.frame_focus.setPixmap(QPixmap(self.images[0]).scaled(800, 450))
             self.frame_focus.setAlignment(Qt.AlignCenter)
             self.download_status.setAlignment(Qt.AlignCenter)
             self.framerange_edit_label.hide()
             self.framerange_input.hide()
-            self.start_select_button.show()
-            self.end_select_button.show()
 
         else:
             self.missing_img.setText(f"No images found in: {self.img_path}")
@@ -179,6 +198,18 @@ class UiFrameRangeWidget(PageNavigation):
         # Clear existing timeline items
         if self.images:
             self.v_layout.addWidget(self.frame_focus)
+            self.thread = QThread()
+            self.eventloop = QEventLoop()
+            self.worker = PixMapHelper(self.images)
+            self.worker.moveToThread(self.thread)
+            self.thread.started.connect(self.worker.makePictures)
+            self.worker.finished.connect(self.thread.quit)
+            self.worker.finished.connect(self.worker.deleteLater)
+            self.thread.finished.connect(self.thread.deleteLater)
+            self.worker.results.connect(self.thread_completed)
+            self.thread.start()
+            self.eventloop.exec()
+
             self.createScrollArea()
             self.v_layout.addWidget(self.frame_scroll)
         else:
@@ -193,6 +224,12 @@ class UiFrameRangeWidget(PageNavigation):
 
         self.setLayout(self.v_layout)
 
+    def thread_completed(self, results):
+        self.pixmaps = results
+        print("[ INFO ] Image loading completed!")
+        if self.eventloop:
+            self.eventloop.quit()
+
     def createScrollArea(self):
         """
         Enable scrolling on frame pictures
@@ -200,43 +237,23 @@ class UiFrameRangeWidget(PageNavigation):
         Return:
             frame_scroll: scrollable widget with frames as buttons
         """
-
         # Rebuild timeline
-        for img in self.images:
-            pixmap = QPixmap(img)
-            if pixmap.isNull():
-                print(f"[ INFO ] Unable to load image: {img}")
-                continue
-
+        for pixmap in self.pixmaps:
             b = ImgButton(pixmap.scaled(400, 225))
             b.setCheckable(True)
             b.setAutoExclusive(True)
             b.clicked.connect(self.updateFocus)
             self.frame_timeline.addWidget(b)
 
-        return self.frame_scroll
-
     def downloadTrace(self):
         self.download_status.setText("Currently downloading. Please wait...")
-        self._pull_event_loop = QEventLoop()
-        self.pull_thread = QThread()
-        self.pull_Worker = WorkerAdbProcess(self.replay_widget.adb, None, self.replay_widget.currentTrace)
-        self.pull_Worker.moveToThread(self.pull_thread)
-        self.pull_thread.started.connect(self.pull_Worker.pullThreaded)
-
-        self.pull_Worker.finished.connect(self.pull_thread.quit)
-        self.pull_Worker.finished.connect(self._pull_event_loop.quit)
-        self.pull_Worker.finished.connect(self.pull_Worker.deleteLater)
-        self.pull_thread.finished.connect(self.pull_thread.deleteLater)
-
-        self.pull_thread.start()
-        self._pull_event_loop.exec()
-        self.download_status.clear()
-
+        _pull_helper = AdbThread()
+        _pull_helper.fileHandler(adb=self.replay_widget.adb, file=self.replay_widget.currentTrace, path="tmp", action="pull")
         msg = QMessageBox()
         msg_text = f" The trace was downloaded here: {os.getcwd()}/tmp"
         msg.setText(msg_text)
         msg.exec()
+        self.download_status.clear()
         self.download_button.clicked.disconnect()
 
     def updateFocus(self, img):

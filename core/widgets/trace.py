@@ -7,6 +7,7 @@ from core.config import ConfigSettings, ConfigGfxrWindow, ConfigPatraceWindow
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QEventLoop
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QGridLayout, QGroupBox, QSizePolicy, QStackedWidget, QMessageBox, QScrollArea, QLineEdit
 from core.page_navigation import PageNavigation, PageIndex
+from core.adb_thread import AdbThread
 from adblib import print_codes
 
 PAGE_APP_SELECTION = 0
@@ -46,11 +47,6 @@ class WorkerAdbProcess(QObject):
             time.sleep(0.5)
 
         self.finished.emit(False)
-
-    def pullThreaded(self):
-        self.adb.pull(self.currentTrace, "tmp/")
-        print(f"[ INFO ] Pulling completed")
-        self.finished.emit(True)
 
     def stop(self):
         self._running = False
@@ -200,7 +196,7 @@ class UiTraceWidget(PageNavigation):
         # Start tracing button
         start_button = QPushButton("START")
         start_button.setFixedWidth(200)
-        self.widgetStyleSheet(start_button, color="green", font_size="16px", selector="QPushButton")
+        self.widgetStyleSheet(start_button, color="limegreen", font_size="16px", selector="QPushButton")
         start_button.clicked.connect(self.appstart)
         self.tracing_page = QWidget()
         self.v_layout = QVBoxLayout(self.tracing_page)
@@ -348,12 +344,19 @@ class UiTraceWidget(PageNavigation):
             ]
             app_start_label = QLabel("\n\n".join(start_label_lines))
 
+            status_started = QLabel()
+            status_started.setObjectName("status")
             self.app_start_layout = QVBoxLayout()
             self.app_start_layout.addWidget(app_start_label)
+            self.app_start_layout.addWidget(status_started)
             self.app_start_layout.setAlignment(Qt.AlignCenter)
 
 
             # Stop Tracing button
+            self.start_application_button = QPushButton("Launch application")
+            self.start_application_button.clicked.connect(self.startApplication)
+            self.start_application_button.setObjectName("launch_app")
+            self.app_start_layout.addWidget(self.start_application_button)
             stop_tracing_button = QPushButton("Stop tracing")
             stop_tracing_button.clicked.connect(self.endTrace)
             self.app_start_layout.addWidget(stop_tracing_button)
@@ -392,7 +395,16 @@ class UiTraceWidget(PageNavigation):
 
     def _appStatus(self, seen:bool):
         self.currentAppStarted = seen
+        label = self.app_start_widget.findChild(QLabel, "status")
+        if label:
+            label.setText("App started!")
+        if not self.start_application_button.isHidden():
+            self.start_application_button.hide()
 
+
+    def startApplication(self):
+        cmd = [f"monkey", "-p", self.currentApp, "-c" ,"android.intent.category.LAUNCHER", "1"]
+        self.adb.command(cmd, errors_handled_externally=True)
 
     def endTrace(self):
         """
@@ -424,33 +436,41 @@ class UiTraceWidget(PageNavigation):
             downloading_label.setAlignment(Qt.AlignCenter)
             abort_tracing = QPushButton("Cancel")
             abort_tracing.setFixedWidth(400)
-            self.widgetStyleSheet(abort_tracing, color="darkred", font_size="16px", selector="QPushButton")
-            retry_tracing_button = QPushButton("redo capture")
+            self.widgetStyleSheet(abort_tracing, color="orangered", font_size="16px", selector="QPushButton")
+            retry_tracing_button = QPushButton("Redo Capture")
             retry_tracing_button.setFixedWidth(400)
-            self.widgetStyleSheet(retry_tracing_button, color="yellow", font_size="16px", selector="QPushButton")
+            self.widgetStyleSheet(retry_tracing_button, color="lightgray", font_size="16px", selector="QPushButton")
             download_trace_button = QPushButton("Download trace")
             download_trace_button.setFixedWidth(400)
-            self.widgetStyleSheet(download_trace_button, color="lightgreen", font_size="16px", selector="QPushButton")
+            self.widgetStyleSheet(download_trace_button, color="lightgray", font_size="16px", selector="QPushButton")
             start_replay_button = QPushButton("Continue")
             start_replay_button.setFixedWidth(400)
-            self.widgetStyleSheet(start_replay_button, color="darkolivegreen", font_size="16px", selector="QPushButton")
+            self.widgetStyleSheet(start_replay_button, color="limegreen", font_size="16px", selector="QPushButton")
             start_replay_button.clicked.connect(self.startReplay)
             retry_tracing_button.clicked.connect(self.appstart)
             abort_tracing.clicked.connect(self.goback)
             # TODO: Placeholder for downloading trace to local directory
             download_trace_button.clicked.connect(self.downloadTrace)
-            h_layout = QHBoxLayout()
-            h_layout.addStretch()
-            h_layout.addWidget(abort_tracing)
-            h_layout.addWidget(retry_tracing_button)
-            h_layout.addWidget(download_trace_button)
-            h_layout.addWidget(start_replay_button)
-            h_layout.addStretch()
+            top_button_layout = QHBoxLayout()
+            top_button_layout.addStretch()
+            top_button_layout.addWidget(retry_tracing_button)
+            top_button_layout.addWidget(download_trace_button)
+            top_button_layout.addStretch()
+
+            bottom_button_layout = QHBoxLayout()
+            bottom_button_layout.addStretch()
+            bottom_button_layout.addWidget(abort_tracing)
+            bottom_button_layout.addWidget(start_replay_button)
+            bottom_button_layout.addStretch()
+
+            button_layout = QVBoxLayout()
+            button_layout.addLayout(top_button_layout)
+            button_layout.addLayout(bottom_button_layout)
 
             self.endTrace_layout = QVBoxLayout()
             self.endTrace_layout.addWidget(app_end_label)
             self.endTrace_layout.addWidget(downloading_label)
-            self.endTrace_layout.addLayout(h_layout)
+            self.endTrace_layout.addLayout(button_layout)
 
             self.app_end_widget = QWidget()
             self.app_end_widget.setLayout(self.endTrace_layout)
@@ -570,27 +590,14 @@ class UiTraceWidget(PageNavigation):
         """
         Download the trace to tmp/
         """
-        # TODO: fix proper thread interface instead of reusing the code multiple places.
         downloading_label = self.app_end_widget.findChild(QLabel, "downloading")
         downloading_label.setText("Currently downloading. Please wait.")
-
-        self._pull_event_loop = QEventLoop()
-        self.pull_thread = QThread()
-        self.pull_Worker = WorkerAdbProcess(self.adb, None, self.currentTrace)
-        self.pull_Worker.moveToThread(self.pull_thread)
-        self.pull_thread.started.connect(self.pull_Worker.pullThreaded)
-
-        self.pull_Worker.finished.connect(self.pull_thread.quit)
-        self.pull_Worker.finished.connect(self._pull_event_loop.quit)
-        self.pull_Worker.finished.connect(self.pull_Worker.deleteLater)
-        self.pull_thread.finished.connect(self.pull_thread.deleteLater)
-
-        self.pull_thread.start()
-        self._pull_event_loop.exec()
+        _pull_helper = AdbThread()
+        _pull_helper.fileHandler(adb=self.adb, file=self.currentTrace, path="tmp", action="pull")
 
         name = str(self.currentTrace).split("/")[-1]
         msg = QMessageBox()
-        msg.setText("\n".join(["INFO: Trace Downloaded to:", f"tmp/{name}"]))
+        msg.setText("\n".join(["INFO: Trace Downloaded to:", f"{os.getcwd()}/tmp/{name}"]))
         msg.exec()
         downloading_label.clear()
 

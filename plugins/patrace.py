@@ -7,7 +7,6 @@ from pathlib import Path
 
 import adblib
 from adblib import print_codes
-# TODO
 
 
 class tracetool(object):
@@ -24,11 +23,12 @@ class tracetool(object):
             'apk': Path('eglretrace/eglretrace-release.apk'),
             'name': 'com.arm.pa.paretrace'
         }
-        self.capture_filepath = None
         self.basepath = Path('artifacts/patrace')
         self.base = self.basepath / self.dirname
-        self.device_output_dir = Path('/data/apitrace/')
-        self.local_output_dir = Path(f'outputs/traces/patrace')
+        self.sdcard_working_dir = Path('/sdcard/devlib-target/')
+        self.capture_app_dir = None
+        self.capture_file_fullpath = None
+        self.capture_root_dir = Path('/data/apitrace/')
         self.device_layer_root = Path("/data/local/debug/gles/")
         self.layer_filename = 'libGLES_layer_arm64.so'
 
@@ -46,18 +46,12 @@ class tracetool(object):
         """
         assert self.adb.device, 'No device selected'
         # Check and cleanup previous caputre file
-        capture_dir = self.device_output_dir / app
-        self.adb.command(['mkdir', '-p', capture_dir], True)
-        self.adb.command(['chmod', 'o+rw', capture_dir], True)
-        self.adb.command(['chcon', 'u:object_r:app_data_file:s0:c512,c768', capture_dir], True)
-        self.capture_filepath = self.device_output_dir / app / (app + ".1.pat")
-        self.adb.delete_file(self.capture_filepath)
-
-        # setup patrace
-        self.adb.command(['setenforce', '0'], True)
-        self.adb.command(['settings', 'put', 'global', 'enable_gpu_debug_layers', '1'])
-        self.adb.command(['settings', 'put', 'global', 'gpu_debug_app', app])
-        self.adb.command(['settings', 'put', 'global', 'gpu_debug_layers_gles', self.layer_filename])
+        self.capture_app_dir = self.capture_root_dir / app
+        self.adb.command(['mkdir', '-p', self.capture_app_dir], True)
+        self.adb.command(['chmod', 'o+rw', self.capture_app_dir], True)
+        self.adb.command(['chcon', 'u:object_r:app_data_file:s0:c512,c768', self.capture_app_dir], True)
+        self.capture_file_fullpath = self.capture_root_dir / app / (app + ".1.pat")
+        self.adb.delete_file(self.capture_file_fullpath)
 
         # Retrieve the app "layer path" to put the capture layer in
         device_layer_root_so = self.device_layer_root / self.layer_filename
@@ -83,6 +77,12 @@ class tracetool(object):
         self.adb.command([f'chmod 777 {device_layer_root_so}'], True)
         self.adb.command([f'chown system:system {device_layer_root_so}'], True)
 
+        # setup patrace
+        self.adb.command(['setenforce', '0'], True)
+        self.adb.command(['settings', 'put', 'global', 'enable_gpu_debug_layers', '1'])
+        self.adb.command(['settings', 'put', 'global', 'gpu_debug_app', app])
+        self.adb.command(['settings', 'put', 'global', 'gpu_debug_layers_gles', self.layer_filename])
+
     def trace_reset_device(self):
         """
         Resets the parameters set by tracing/replaying to their original value.
@@ -91,71 +91,12 @@ class tracetool(object):
         self.adb.command(['settings', 'delete', 'global', 'gpu_debug_app'])
         self.adb.command(['settings', 'delete', 'global', 'gpu_debug_layers_gles'])
 
-        # Remove all costom settings
+        # Remove all custom settings
         self.adb.cleanup()
 
     def trace_parse_logcat(self, app):
         return []
 
-    def trace_find_output(self, app):
-        """
-        Finds outputs that matches the given application/package.
-
-        Args:
-            app (str): App package name, e.g. com.example.myapp
-
-        Returns:
-            list[str]: list of all matching output, if none returns None
-        """
-        results = self.adb.commmand(
-            f"ls {self.device_output_dir} | grep {str(app).replace('.','_')}").split()
-        if results:
-            for i, r in enumerate(results):
-                results[i] = self.device_output_dir / results[i]
-            return results
-        return None
-
-    def trace_get_output(self, files=None, output_dir=None, app=None):
-        """
-        Pulls the files from the device (remote) to the output dir (local).
-
-        Args:
-            files (str/list[str]): A path to a file or a list of paths
-            output_dir: Local dir where one want the output to be stored, set to default if None
-            app: App package name, e.g. com.example.myapp (use instead of files)
-
-        Returns:
-            list[str]: List of all local output file paths
-        """
-        assert not files or not app, 'Do not use both app (find) and files at the same time'
-
-        if not files:
-            files = self.trace_find_output(app)
-
-        assert files, "No output file(s)"
-
-        if not isinstance(files, list):
-            files = [files]
-
-        outputs = []
-        for file_path in files:
-            print(f"[ INFO ] Fetching result file: {file_path}")
-            stdout, _ = self.adb.command(
-                [f"if [ -f {file_path} ]; then echo true; else echo false; fi"])
-            if stdout == 'true':
-                if output_dir:
-                    Path(output_dir).mkdir(parents=True, exist_ok=True)
-                    self.adb.pull(file_path, output_dir)
-                    outputs.append(output_dir / Path(file_path))
-                else:
-                    self.local_output_dir.mkdir(parents=True, exist_ok=True)
-                    self.adb.pull(file_path, self.local_output_dir)
-                    outputs.append(self.local_output_dir / Path(file_path))
-            else:
-                print(
-                    f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] Result file: {file_path} does not exist on device")
-
-        return outputs
 
     def trace_setup_check(self, app):
         """
@@ -201,10 +142,8 @@ class tracetool(object):
         else:
             print(f"[ INFO ] App ({app}) is not running")
 
-        self.adb.command(['chmod', 'o+rw', self.capture_filepath], True)
-        return self.capture_filepath
-
-    # Replay commands
+        self.adb.command(['chmod', 'o+rw', self.capture_file_fullpath], True)
+        return self.capture_file_fullpath
 
     def replay_setup(self, device=None):
         """
@@ -218,14 +157,15 @@ class tracetool(object):
         self.adb.manage_app_permissions(self.replayer['name'], device)
         # clear the logcat after setup
 
-    def replay_start(self, file, screenshot=False, hwc=False, repeat=1, device=None, extra_args=[]):
-        results = {}
+    def replay_start(self, file, screenshot=False, hwc=False, repeat=1, device=None, extra_args=[], from_frame=None, to_frame=""):
         json_data = {}
         json_data["file"] = str(file)
+        if from_frame is None:
+            from_frame = 0
 
         # TODO make cleanup functions more efficient and run after frame selection/fastforwarding
         if hwc:
-            hwcpipe_layer_result_mask = "/sdcard/devlib-target/*_gpu_id_*_per_frame_counters.csv"
+            hwcpipe_layer_result_mask = self.sdcard_working_dir / "*_gpu_id_*_per_frame_counters.csv"
             # Delete existing hwc data as this can lead to dangerous mixups on replay failure
             # TODO: Remove this when we properly detect success/failure on
             # replay
@@ -235,18 +175,22 @@ class tracetool(object):
                 True, None, True)
 
             json_data["perfmon"] = True
-            json_data["perfmonout"] = "/sdcard/devlib-target/"
+            json_data["perfmonout"] = f"{self.sdcard_working_dir}/"
 
         if screenshot:
             dir_prefix = f'{Path(file).stem}_screenshot'
-            sdcard_dir = f"/sdcard/devlib-target/{dir_prefix}"
+            sdcard_dir = self.sdcard_working_dir / dir_prefix
             screenshot_prefix = f'{dir_prefix}_frame_'
             self.adb.command(['mkdir', '-p', sdcard_dir])
             json_data["snapshotCallset"] = "frame/*/10"
             json_data["snapshotPrefix"] = f"{sdcard_dir}/{screenshot_prefix}"
             json_data["snapshotFrameNames"] = True
-            if screenshot == 'all':
+            if screenshot == "fastforward":
+                json_data["snapshotCallset"] = f"frame/{from_frame}-{to_frame}/1"
+            elif screenshot == "all":
                 json_data["snapshotCallset"] = "frame/*/1"
+            if screenshot == "selecting_frames" and isinstance(from_frame, list):
+                json_data["snapshotCallset"] = ",".join([f"frame/{f}/1" for f in from_frame])
 
         if repeat != 1:
             assert repeat > 1, 'Repeate cannot be less than one'
@@ -255,14 +199,14 @@ class tracetool(object):
         cmd = [
             'am', 'start',
             '-n', f'{self.replayer["name"]}/.Activities.RetraceActivity',
-            '--es', 'jsonData', '/sdcard/devlib-target/replay_args.json',
+            '--es', 'jsonData', f'{self.sdcard_working_dir}/replay_args.json',
         ]
         cmd.extend(extra_args)
 
         return cmd, json_data
 
     def replay_reset_device(self):
-        pass
+        self.trace_reset_device()
 
     def parse_logcat(self, mode=None, app=None):  # return None when done
         filter = "patrace"
@@ -301,35 +245,6 @@ class tracetool(object):
             err_lines.append(f"WARNING: Found no mention of the target app: {app} in the logcat output, app may not have been started.\n")
 
         return err_lines
-    # Private helper functions
-
-    def __run_replayer(self, cmd):
-        """
-        Runs the replayer. Sleeps until it has finnished running.
-        """
-        self.adb.command(cmd)
-        time.sleep(0.1)
-
-        # TODO - check if this works when retracing patrace
-        stdout, _ = self.adb.command([f"ps -A | grep {self.replayer['name']}"])
-        while self.replayer['name'] in stdout:
-            print("Replay still ongoing. Sleeping 1 second")
-            time.sleep(1.0)
-            stdout, _ = self.adb.command([f"ps -A | grep {self.replayer['name']}"])
-
-    def __check_screenshots_on_device(self, base_dir, grep_string, cleanup=False):
-        paths, _ = self.adb.command(
-            [f'ls {base_dir} | grep {grep_string}'])
-        paths = paths.split()
-        full_paths = []
-        for path in paths:
-            full_paths.append(f"{base_dir}/{path}")
-        if not cleanup:
-            return full_paths
-        if full_paths:
-            print(f"[ {print_codes.SUCCESS}INFO{print_codes.END_CODE} ] Cleaning up screenshot directory")
-            for path in full_paths:
-                self.adb.command(["rm", path])
 
 
 if __name__ == '__main__':

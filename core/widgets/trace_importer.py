@@ -100,7 +100,6 @@ class UiTraceImportWidget(PageNavigation):
         Set variables based on checkboxes and gets valid plugin name
         """
         self.cleanUpImages()
-        self.adb.cleanUpSDCard()
         self.trace = self.importWindow.getTrace()
         if not self.trace:
             print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] Trace input empty, please provide a trace path")

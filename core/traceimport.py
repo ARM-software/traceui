@@ -27,11 +27,11 @@ class ImportWindow(QWidget):
 
         self.lineEdit_range = QLineEdit()
 
-        self.override_existing_checkbox = QCheckBox(f"Override existing trace:")
-        self.skip_replay_checkbox = QCheckBox(f"Skip replaying trace:")
-        self.skip_screenshot_checkbox = QCheckBox(f"Skip screenshot generation:")
-        self.delete_trace_on_shutdown_checkbox = QCheckBox(f"Delete trace on shutdown:")
-        self.remove_unsupported_extensions_on_replay = QCheckBox(f"Remove unsupported extensions:")
+        self.override_existing_checkbox = QCheckBox(f"Override existing trace on device")
+        self.skip_replay_checkbox = QCheckBox("Skip trace replay and use pre-decided framerange (no replay, no screenshots)")
+        self.skip_screenshot_checkbox = QCheckBox(f"Use pre-decided frame range (will replay, no screenshots) ")
+        self.delete_trace_on_shutdown_checkbox = QCheckBox(f"Remove imported trace from device during cleanup")
+        self.remove_unsupported_extensions_on_replay = QCheckBox(f"Remove unsupported extensions")
 
         self.button = QPushButton("Start")
         self.button.clicked.connect(self.updateTrace)

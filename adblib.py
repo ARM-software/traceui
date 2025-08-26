@@ -203,7 +203,7 @@ class adb(object):
         subprocess.run(cmd, capture_output=True, text=True)  # first just to initialize adb if needed
         out = subprocess.run(cmd, capture_output=True, text=True)  # second to actually get device list
         for d in out.stdout.split('\n')[1:]:
-            m = re.match(r'(\w+)\s+(\w+)', d)
+            m = re.match(r'(\S+)\s+(\w+)', d)
             if not m:
                 continue
             if m.group(2) == 'device':
@@ -314,7 +314,7 @@ class adb(object):
         print(f"[ INFO ] Pushing file from local path {file} to /sdcard/")
         subprocess.run(['adb', '-s', device, 'push', file, '/sdcard/'], capture_output=True, text=True)  # copy to sdcard first
         self.command(['mkdir', '-p', path], True, device)  # make sure destination exists
-        print(f"[ INFO ] Pushing file from device path /sdcard/ to device path {path}")
+        print(f"[ INFO ] Moving file from device path /sdcard/ to device path {path}")
         self.command(['mv', '/sdcard/%s' % basename, path], True, device)
         self.command(['chmod', 'a+r', str(path) + '/' + str(basename)], True, device)
 

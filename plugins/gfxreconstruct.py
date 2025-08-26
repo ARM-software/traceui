@@ -39,9 +39,11 @@ class tracetool(object):
         }
         self.basepath = Path('artifacts/gfxreconstruct-arm')
         self.base = None
-        self.device_output_dir = Path('/sdcard/devlib-target/')
+        self.sdcard_working_dir = Path('/sdcard/devlib-target/')
+        self.capture_root_dir = Path('/data/gfxr/')
+        self.capture_app_dir = None
+        self.capture_file_fullpath = None
         self.capture_file_name = None
-        self.local_output_dir = Path('outputs/traces/gfxr')
         self.device_layer_debug_root = Path("/data/local/debug/vulkan/")
 
     def uptodate(self):
@@ -87,13 +89,16 @@ class tracetool(object):
         self.adb.setprop('debug.gfxrecon.capture_file_timestamp', 'false')
         self.adb.setprop('debug.gfxrecon.capture_frames', "''")
         # TODO: Update the capture_file_name when capture_frames is set
-        self.adb.command(['mkdir', '-p', self.device_output_dir])
+        self.capture_app_dir = self.capture_root_dir / app
+        self.adb.command(['mkdir', '-p', self.capture_app_dir], True)
+        self.adb.command(['chmod', 'o+rw', self.capture_app_dir], True)
+        self.adb.command(['chcon', 'u:object_r:app_data_file:s0:c512,c768', self.capture_app_dir], True)
         self.capture_file_name = self.__generate_trace_name(app)
-        device_output_file = self.device_output_dir / self.capture_file_name
-        self.adb.setprop('debug.gfxrecon.capture_file', device_output_file)
+        self.capture_file_fullpath = self.capture_app_dir / self.capture_file_name
+        self.adb.setprop('debug.gfxrecon.capture_file', self.capture_file_fullpath)
         print(
-            f"[ INFO ] GFXReconstruct output trace file to: {device_output_file}")
-        self.adb.delete_file(device_output_file)
+            f"[ INFO ] GFXReconstruct output trace file to: {self.capture_file_fullpath}")
+        self.adb.delete_file(self.capture_file_fullpath)
 
         self.adb.setprop('debug.gfxrecon.page_guard_separate_read', 'false')
 
@@ -146,67 +151,6 @@ class tracetool(object):
     def trace_parse_logcat(self, app):  # return None when done
         return ''
 
-    # TODO - should have some form for handling --screenshots-all
-    def trace_find_output(self, app):
-        """
-        Finds outputs that matches the given application/package.
-
-        Args:
-            app (str): App package name, e.g. com.example.myapp
-
-        Returns:
-            list[str]: list of all matching output, if none returns None
-        """
-        results = self.adb.commmand(
-            f"ls {self.device_output_dir} | grep {str(app).replace('.','_')}").split()
-        if results:
-            for i, r in enumerate(results):
-                results[i] = self.device_output_dir / results[i]
-            return results
-        return None
-
-    def trace_get_output(self, files=None, output_dir=None, app=None):
-        """
-        Pulls the files from the device (remote) to the output dir (local).
-
-        Args:
-            files (str/list[str]): A path to a file or a list of paths
-            output_dir: Local dir where one want the output to be stored, set to default if None
-            app: App package name, e.g. com.example.myapp (use instead of files)
-
-        Returns:
-            list[str]: List of all local output file paths
-        """
-        assert not files or not app, 'Do not use both app (find) and files at the same time'
-
-        if not files:
-            files = self.trace_find_output(app)
-
-        assert files, "No output file(s)"
-
-        if not isinstance(files, list):
-            files = [files]
-
-        outputs = []
-        for file_path in files:
-            print(f"[ INFO ] Fetching result file: {file_path}")
-            stdout, _ = self.adb.command(
-                [f"if [ -f {file_path} ]; then echo true; else echo false; fi"])
-            if stdout == 'true':
-                if output_dir:
-                    Path(output_dir).mkdir(parents=True, exist_ok=True)
-                    self.adb.pull(file_path, output_dir)
-                    outputs.append(output_dir / Path(file_path))
-                else:
-                    self.local_output_dir.mkdir(parents=True, exist_ok=True)
-                    self.adb.pull(file_path, self.local_output_dir)
-                    outputs.append(self.local_output_dir / Path(file_path))
-            else:
-                print(
-                    f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] Result file: {file_path} does not exist on device")
-
-        return outputs
-
     def trace_setup_check(self, app):
         """
         Checks if tracing setup was set correctly.
@@ -256,14 +200,15 @@ class tracetool(object):
         else:
             print(f"[ INFO ] App ({app}) is already stopped")
 
-        device_output_file = self.device_output_dir / self.capture_file_name
-        self.adb.pull(device_output_file, 'tmp')
+        self.adb.command(['chmod', 'o+rw', self.capture_file_fullpath], True)
+        self.adb.pull(self.capture_file_fullpath, 'tmp')
         optimized_trace = self.optimize_trace(f"tmp/{self.capture_file_name}")
         if optimized_trace is not None:
-            self.adb.push(optimized_trace, self.device_output_dir, device=None, track=False)
+            self.adb.push(optimized_trace, self.sdcard_working_dir, device=None, track=False)
             self.capture_file_name = f'{Path(self.capture_file_name).stem}.optimized.gfxr'
 
-        return self.device_output_dir / self.capture_file_name
+
+        return self.sdcard_working_dir / self.capture_file_name
 
     def optimize_trace(self, trace):
         """
@@ -304,7 +249,7 @@ class tracetool(object):
         self.adb.clear_logcat()
 
     def replay_start(self, file, screenshot=False, hwc=False,
-                     repeat=1, device=None, extra_args=[]):
+                     repeat=1, device=None, extra_args=[], from_frame=None, to_frame=""):
         """
         Does replay from start to finish. Returns paths to the results.
 
@@ -325,6 +270,8 @@ class tracetool(object):
         assert not screenshot or not hwc, 'Do not use both hwc and screenshot at the same time'
 
         hwcpipe_layer_result_mask = "/sdcard/*_gpu_id_*_per_frame_counters.csv"
+        if from_frame is None:
+            from_frame = 1
 
         if hwc:
             # Delete existing hwc data as this can lead to dangerous mixups on replay failure
@@ -346,7 +293,7 @@ class tracetool(object):
 
             if screenshot:
                 screenshot_prefix = f'{Path(file).stem}_screenshot'
-                device_opdir = self.device_output_dir / f"{screenshot_prefix}"
+                device_opdir = self.sdcard_working_dir / f"{screenshot_prefix}"
                 self.adb.command(['mkdir', '-p', device_opdir])
                 cmd.extend([
                     '--screenshot-all',
@@ -358,9 +305,15 @@ class tracetool(object):
                 if screenshot == "frame_selection":
                     cmd.extend(["--screenshot-interval", "10"])
                 #TODO: Check if this is all needed for FF generation
-                if isinstance(screenshot, list):
-                    cmd.remove("screenshot-all")
-                    cmd.extend(['--screenshots', screenshot.join(",")])
+                elif screenshot == "fastforward":
+                    cmd.remove("--screenshot-all")
+                    cmd.extend([f'--screenshots {from_frame}-{to_frame}'])
+                elif screenshot == "selecting_frames" and isinstance(from_frame, list):
+                    from_frame.sort()
+                    total_range = ",".join([f"{f + 1}" for f in from_frame])
+
+                    cmd.remove("--screenshot-all")
+                    cmd.extend([f'--screenshots {total_range}'])
                 # replayer produces .bmp - should be converted to .png
 
             if hwc:

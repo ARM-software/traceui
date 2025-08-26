@@ -4,6 +4,7 @@ import shutil
 import os
 
 from pathlib import Path
+from core.adb_thread import AdbThread
 from core.page_navigation import PageIndex
 from core.widgets.connect_device import UIConnectDevice
 from core.widgets.base import UiBaseWidget
@@ -103,7 +104,7 @@ class MainWindow(QMainWindow):
         self.widget_framerange = UiFrameRangeWidget()
         self.widget_loading = self.loadingWidget()
         self.widget_import = UiTraceImportWidget(self.adb, self.trace, self.plugins)
-        self.widget_frameselection = UiFrameSelectionWidget(self.widget_replay)
+        self.widget_frameselection = UiFrameSelectionWidget()
         self.widget_fastforward = UiFastForwardWidget()
 
         self.pages_dict = {
@@ -213,6 +214,10 @@ class MainWindow(QMainWindow):
         """
         Go to fast forward from frame selection
         """
+        self.widget_fastforward.replay_widget = self.widget_frameselection.replay_widget
+        self.widget_fastforward.frames = self.widget_frameselection.frame_num_list
+        self.widget_fastforward.framerange_start = self.widget_frameselection.framerange_start
+        self.widget_fastforward.framerange_end = self.widget_frameselection.framerange_end
         self.stacked.setCurrentIndex(PageIndex.FAST_FORWARD)
 
     def gotoFramerangeSelection(self):
@@ -229,6 +234,7 @@ class MainWindow(QMainWindow):
         """
         self.widget_frameselection.framerange_start = self.widget_framerange.current_range_start
         self.widget_frameselection.framerange_end = self.widget_framerange.current_range_end
+        self.widget_frameselection.replay_widget = self.widget_replay
         self.stacked.setCurrentIndex(PageIndex.FRAME_SELECTION)
 
     def readStateFromImporter(self):
@@ -255,11 +261,10 @@ class MainWindow(QMainWindow):
             trace_exists_on_device = False
 
         if (not trace_exists_on_device) or self.widget_import.override_trace_if_existing:
-            print(f"[ INFO ] Pushing trace file: {self.currentTrace} to device folder {target_path}")
-            self.adb.push(self.currentTrace, target_path, device=None, track=self.widget_import.delete_trace_on_shutdown)
+            self.helper_thread = AdbThread()
+            self.helper_thread.fileHandler(adb=self.adb, file=self.currentTrace, path=target_path, track=self.widget_import.delete_trace_on_shutdown, action="push")
         elif trace_exists_on_device:
             print(f"[ INFO ] Skipping upload of trace file: {self.currentTrace} to device folder {target_path} because it already exists on the target device")
-
         self.currentTrace = target_path / os.path.basename(self.currentTrace)
 
         print(f"[ INFO ] Trace path on device is: {self.currentTrace}")
@@ -328,13 +333,17 @@ class MainWindow(QMainWindow):
         self.showLoadingScreen()
         self.currentTool = self.pages[PageIndex.TRACE].currentTool
         self.currentTrace = self.pages[PageIndex.TRACE].currentTrace
+        self.is_importing = False
+        self.skip_screenshotReplay = False
+        self.skip_replay = False
         self.move_to_replay_widget_on_import()
 
     def move_to_replay_widget_on_import(self):
         """ Catches a signal (replay_signal) and moves to the replay widget but assume current tool and trace have been set on import """
         self.cleanupTmpReplayImgDir()
         if not self.is_importing:
-            self.adb.pull(self.currentTrace, 'tmp')
+            _pull_helper = AdbThread()
+            _pull_helper.fileHandler(adb=self.adb, file=self.currentTrace, path="tmp", action="pull")
         if self.skip_replay:
             return
 
@@ -366,6 +375,8 @@ class MainWindow(QMainWindow):
             else:
                 self.set_page(PageIndex.START)
                 self.move_to_start_widget()
+                return
+        self.widget_replay.gotoframe_range_signal()
 
 
 
