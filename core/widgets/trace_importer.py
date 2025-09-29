@@ -45,7 +45,6 @@ class UiTraceImportWidget(PageNavigation):
         self.trace = None
         self.target_plugin = None
         self.skip_replay = None
-        self.skip_screenshotReplay = None
         self.importWindow.close()
         self.importWindow = None
 
@@ -118,7 +117,6 @@ class UiTraceImportWidget(PageNavigation):
 
         self.override_trace_if_existing = self.importWindow.overrideIfExisting()
         self.skip_replay = self.importWindow.skipReplay()
-        self.skip_screenshotReplay = self.importWindow.skipGetScreenshot()
         self.delete_trace_on_shutdown = self.importWindow.deleteTraceOnShutdown()
         self.remove_unsupported_extensions_on_replay = self.importWindow.removeUnsupportedExtensions()
 

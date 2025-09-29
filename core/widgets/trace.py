@@ -5,7 +5,7 @@ import shutil
 from core.config import ConfigSettings, ConfigGfxrWindow, ConfigPatraceWindow
 
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QEventLoop
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QGridLayout, QGroupBox, QSizePolicy, QStackedWidget, QMessageBox, QScrollArea, QLineEdit
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QGridLayout, QGroupBox, QSizePolicy, QStackedWidget, QMessageBox, QScrollArea, QLineEdit, QCheckBox
 from core.page_navigation import PageNavigation, PageIndex
 from core.adb_thread import AdbThread
 from adblib import print_codes
@@ -78,7 +78,6 @@ class UiTraceWidget(PageNavigation):
         self.currentApp = None
         self.currentAppStarted = False
         self.lastTrace = None
-
         self.plugins = plugins
         self.currentTool = None
 
@@ -95,6 +94,8 @@ class UiTraceWidget(PageNavigation):
         self.adb.clear_logcat()
         self.button_list = None
         self.searchbar.clear()
+        if self.start_application_button.isHidden():
+            self.start_application_button.show()
 
     def appSelectionPage(self):
         """
@@ -120,6 +121,7 @@ class UiTraceWidget(PageNavigation):
         header.setAlignment(Qt.AlignCenter)
         start_button = QPushButton("Next")
         start_button.clicked.connect(self.apkAnalyses_toolMatching)
+        self.apk_analysis = QCheckBox("Skip extracting Engine/API info from apk")
         self.setupAppLayouts(back_button, header, start_button)
         self.nestedStack.setCurrentIndex(PAGE_APP_SELECTION)
 
@@ -156,35 +158,36 @@ class UiTraceWidget(PageNavigation):
             apis.append("Vulkan")
         if uses_gles:
             apis.append("OpenGLES")
-        apis_text = ", ".join(apis) if apis else "Unknown"
-        print(f"[ INFO ] Detected Engine: {engine or 'Unknown'}\nUsed APIs: {apis_text}")
-        self.trace_info_label.setText(
-            f"Detected Engine: {engine or 'Unknown'}\nUsed APIs: {apis_text}\n\n Select Appropriate trace tool. \n Try gfxreconstruct first if available"
-        )
         # show only relevant tools
         self.adbWorker.stop()
-        self.setupToolsFiltered(uses_vulkan, uses_gles)
+        self.setupToolsFiltered(uses_gles, uses_vulkan, apis, engine)
 
     def apkAnalyses_toolMatching(self):
         # Back button
-        self.setupLoading()
-        self.nestedStack.setCurrentIndex(PAGE_ANALYSING_APK)
-        QApplication.processEvents()
-        self.adbThread = QThread()
-        self.adbWorker = WorkerAdbProcess(self.adb, self.currentApp, None)
-        self.adbWorker.moveToThread(self.adbThread)
+        if not self.apk_analysis.isChecked():
+            self.setupLoading()
+            self.nestedStack.setCurrentIndex(PAGE_ANALYSING_APK)
+            QApplication.processEvents()
+            self.adbThread = QThread()
+            self.adbWorker = WorkerAdbProcess(self.adb, self.currentApp, None)
+            self.adbWorker.moveToThread(self.adbThread)
 
-        #self.thread.started.connect(lambda: self.worker.run_analyse_apk(self.adb, self.currentApp))
-        self.adbThread.started.connect(self.adbWorker.run_analyse_apk)
-        self.adbWorker.result_ready.connect(self.handleWorkerResult)
+            self.adbThread.started.connect(self.adbWorker.run_analyse_apk)
+            self.adbWorker.result_ready.connect(self.handleWorkerResult)
 
-        self.adbWorker.finished.connect(self.adbThread.quit)
-        self.adbWorker.finished.connect(self.adbWorker.deleteLater)
-        self.adbThread.finished.connect(self.adbThread.deleteLater)
-        self.adbWorker.finished.connect(self.go_to_tracing_page)
-        QTimer.singleShot(0, self.adbThread.start)
-        self.adbThread.start()
-        self.traceToolSelectionPage()
+            self.adbWorker.finished.connect(self.adbThread.quit)
+            self.adbWorker.finished.connect(self.adbWorker.deleteLater)
+            self.adbThread.finished.connect(self.adbThread.deleteLater)
+            self.adbWorker.finished.connect(self.go_to_tracing_page)
+            QTimer.singleShot(0, self.adbThread.start)
+            self.adbThread.start()
+            self.traceToolSelectionPage()
+        else:
+            self.traceToolSelectionPage()
+            self.trace_result = {"uses_vulkan": True, "uses_gles": True}
+            self.setupToolsFiltered()
+            self.go_to_tracing_page()
+
 
     def traceToolSelectionPage(self):
         """
@@ -228,7 +231,6 @@ class UiTraceWidget(PageNavigation):
             header: Widget for header
             start: Widget for start button
         """
-        self.nestedStack = QStackedWidget()
         app_selection_page = QWidget()
         v_layout = QVBoxLayout(app_selection_page)
         button_group = QGroupBox()
@@ -239,6 +241,7 @@ class UiTraceWidget(PageNavigation):
         v_layout.addWidget(self.searchbar)
         v_layout.addWidget(self.app_grid_widget)
         v_layout.addWidget(button_group)
+        v_layout.addWidget(self.apk_analysis)
         v_layout.addWidget(start)
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(self.nestedStack)
@@ -343,6 +346,7 @@ class UiTraceWidget(PageNavigation):
                 "Stopping tracing will also parse logcat for errors, and can help with debugging if the app crashes."
             ]
             app_start_label = QLabel("\n\n".join(start_label_lines))
+            app_start_label.setObjectName("start label")
 
             status_started = QLabel()
             status_started.setObjectName("status")
@@ -359,6 +363,7 @@ class UiTraceWidget(PageNavigation):
             self.app_start_layout.addWidget(self.start_application_button)
             stop_tracing_button = QPushButton("Stop tracing")
             stop_tracing_button.clicked.connect(self.endTrace)
+            stop_tracing_button.setObjectName("end trace")
             self.app_start_layout.addWidget(stop_tracing_button)
 
             # Set widget layout and add to nested stack
@@ -406,6 +411,19 @@ class UiTraceWidget(PageNavigation):
         cmd = [f"monkey", "-p", self.currentApp, "-c" ,"android.intent.category.LAUNCHER", "1"]
         self.adb.command(cmd, errors_handled_externally=True)
 
+    def updatePage(self):
+        info_string = "Tracing has stopped. \n\n "
+        if self.currentTool == "gfxreconstruct":
+            info_string+= "Optimizing trace. Please wait..."
+        status_label = self.app_start_widget.findChild(QLabel, "start label")
+        status_label.setText(info_string)
+        label = self.app_start_widget.findChild(QLabel, "status")
+        label.clear()
+        end_trace_button = self.app_start_widget.findChild(QPushButton, "end trace")
+        if end_trace_button.isVisible():
+            end_trace_button.hide()
+
+
     def endTrace(self):
         """
         Stop current running tracing and set up the post-trace page
@@ -413,6 +431,8 @@ class UiTraceWidget(PageNavigation):
         # Stop tracing with trace tool and reset device
         self.adbWorker.stop()
         if self.plugins[self.currentTool].trace_setup_check(self.currentApp) and self.currentAppStarted:
+            self.updatePage()
+            QApplication.processEvents()
             remote_path_to_trace = self.plugins[self.currentTool].trace_stop(self.currentApp)
             # Page nr 2: After trace stop page
             self.end_trace_widget = QWidget()
@@ -502,16 +522,25 @@ class UiTraceWidget(PageNavigation):
         else:
             self.nestedStack.setCurrentIndex(PAGE_APP_SELECTION)
 
-    def setupToolsFiltered(self, uses_vulkan, uses_gles):
+    def setupToolsFiltered(self, uses_gles=True, uses_vulkan=True, apis=[], engine=""):
         """
         Set up tool buttons for the used APIs. If no API is found, all plugins are shown
 
         Args:
             uses_vulkan (bool): True if the application uses Vulkan. False if not
             uses_gles (bool): True if the application uses OpenGl ES. False if not
+            apis (list): list of used APIs
+            engine (str): Graphics engine used in application
         """
         # TODO: Pass engine info to plugins for custom retracer options
         # Show tools based on detected package APIs
+        if self.tool_layout.count() >= 4:
+            return
+        apis_text = ", ".join(apis) if apis else "Unknown"
+        print(f"[ INFO ] Detected Engine: {engine or 'Unknown'}\nUsed APIs: {apis_text}")
+        self.trace_info_label.setText(
+            f"Detected Engine: {engine or 'Unknown'}\nUsed APIs: {apis_text}\n\n Select Appropriate trace tool. \n Try gfxreconstruct first if available"
+        )
         trace_tools = ["patrace", "gfxreconstruct"]
         for key, value in self.plugins.items():
             if value.plugin_name not in trace_tools:
@@ -605,5 +634,7 @@ class UiTraceWidget(PageNavigation):
         """
         Refresh the applist
         """
+        self.nestedStack = QStackedWidget()
+        self.traceToolSelectionPage()
         QWidget().setLayout(self.layout())
         self.appSelectionPage()

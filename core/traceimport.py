@@ -1,5 +1,5 @@
 from core.config import ClickableQLineEdit, openFileExplorer
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QLineEdit, QFormLayout, QPushButton, QCheckBox, QMessageBox
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QLineEdit, QFormLayout, QPushButton, QCheckBox
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QCloseEvent
 
@@ -27,11 +27,12 @@ class ImportWindow(QWidget):
 
         self.lineEdit_range = QLineEdit()
 
-        self.override_existing_checkbox = QCheckBox(f"Override existing trace on device")
-        self.skip_replay_checkbox = QCheckBox("Skip trace replay and use pre-decided framerange (no replay, no screenshots)")
-        self.skip_screenshot_checkbox = QCheckBox(f"Use pre-decided frame range (will replay, no screenshots) ")
-        self.delete_trace_on_shutdown_checkbox = QCheckBox(f"Remove imported trace from device during cleanup")
-        self.remove_unsupported_extensions_on_replay = QCheckBox(f"Remove unsupported extensions")
+        self.override_existing_checkbox = QCheckBox("Override existing trace on device")
+        self.skip_replay_checkbox = QCheckBox("Skip replay validation for imported trace")
+        self.delete_trace_on_shutdown_checkbox = QCheckBox("Remove imported trace from device during cleanup")
+        self.remove_unsupported_extensions_on_replay = QCheckBox("Remove unsupported extensions")
+        self.delete_trace_on_shutdown_checkbox = QCheckBox("Remove imported trace from device during cleanup")
+        self.remove_unsupported_extensions_on_replay = QCheckBox("Remove unsupported extensions")
 
         self.button = QPushButton("Start")
         self.button.clicked.connect(self.updateTrace)
@@ -45,7 +46,6 @@ class ImportWindow(QWidget):
         layout2 = QVBoxLayout()
         layout2.addWidget(self.override_existing_checkbox)
         layout2.addWidget(self.skip_replay_checkbox)
-        layout2.addWidget(self.skip_screenshot_checkbox)
         layout2.addWidget(self.delete_trace_on_shutdown_checkbox)
         layout2.addWidget(self.remove_unsupported_extensions_on_replay)
         self.remove_unsupported_extensions_on_replay.setChecked(True)
@@ -82,12 +82,6 @@ class ImportWindow(QWidget):
         Return bool based on "override"-checkbox
         """
         return self.override_existing_checkbox.isChecked()
-
-    def skipGetScreenshot(self):
-        """
-        Return bool based on "skip screenshot"-checkbox
-        """
-        return self.skip_screenshot_checkbox.isChecked()
 
     def skipReplay(self):
         """

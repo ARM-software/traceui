@@ -1,8 +1,6 @@
 #!/usr/bin/python3
 
-import time
 import os
-import json
 from pathlib import Path
 
 import adblib
@@ -157,11 +155,13 @@ class tracetool(object):
         self.adb.manage_app_permissions(self.replayer['name'], device)
         # clear the logcat after setup
 
-    def replay_start(self, file, screenshot=False, hwc=False, repeat=1, device=None, extra_args=[], from_frame=None, to_frame=""):
+    def replay_start(self, file, screenshot=False, hwc=False, repeat=1, device=None, extra_args=[], from_frame=None, to_frame="", interval=10):
         json_data = {}
         json_data["file"] = str(file)
         if from_frame is None:
             from_frame = 0
+        if to_frame:
+            json_data["frames"] = f'1-{to_frame+5}'
 
         # TODO make cleanup functions more efficient and run after frame selection/fastforwarding
         if hwc:
@@ -182,11 +182,12 @@ class tracetool(object):
             sdcard_dir = self.sdcard_working_dir / dir_prefix
             screenshot_prefix = f'{dir_prefix}_frame_'
             self.adb.command(['mkdir', '-p', sdcard_dir])
-            json_data["snapshotCallset"] = "frame/*/10"
             json_data["snapshotPrefix"] = f"{sdcard_dir}/{screenshot_prefix}"
             json_data["snapshotFrameNames"] = True
-            if screenshot == "fastforward":
+            if screenshot == "specific_framerange":
                 json_data["snapshotCallset"] = f"frame/{from_frame}-{to_frame}/1"
+            elif screenshot == "interval" and interval != 0:
+                json_data["snapshotCallset"] = f"frame/*/{interval}"
             elif screenshot == "all":
                 json_data["snapshotCallset"] = "frame/*/1"
             if screenshot == "selecting_frames" and isinstance(from_frame, list):

@@ -9,6 +9,7 @@ from core.page_navigation import PageIndex
 from core.widgets.connect_device import UIConnectDevice
 from core.widgets.base import UiBaseWidget
 from core.widgets.trace import UiTraceWidget
+from core.widgets.replay_settings import UiReplaySettings
 from core.widgets.replay import UiReplayWidget
 from core.widgets.framerange import UiFrameRangeWidget
 from core.widgets.trace_importer import UiTraceImportWidget
@@ -43,7 +44,6 @@ class MainWindow(QMainWindow):
 
         self.currentApp = ""
         self.currentTrace = ""
-        self.skip_screenshotReplay = False
         self.skip_replay = False
         self.remove_unsupported_extensions_on_replay = True
         self.is_importing = False
@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
         for i, btn in enumerate(self.step_buttons):
             btn.setChecked(i == index)
             btn.setEnabled(i in self.visited_pages or i == index)
-            btn.setProperty("current", i in self.visited_pages and i==index)
+            btn.setProperty("current", i in self.visited_pages and i == index)
             btn.setProperty("future", i not in self.visited_pages and i != index)
             btn.style().unpolish(btn)
             btn.style().polish(btn)
@@ -244,7 +244,6 @@ class MainWindow(QMainWindow):
         self.stacked.setCurrentIndex(PageIndex.REPLAY)
         self.currentTool = self.widget_import.target_plugin_name
         self.currentTrace = Path(self.widget_import.trace)
-        self.skip_screenshotReplay = self.widget_import.skip_screenshotReplay
         self.skip_replay = self.widget_import.skip_replay
         self.remove_unsupported_extensions_on_replay = self.widget_import.remove_unsupported_extensions_on_replay
         self.is_importing = True
@@ -253,7 +252,7 @@ class MainWindow(QMainWindow):
         target_path = Path("/sdcard/devlib-target/")
         self.adb.clear_logcat()
         self.adb.command(["mkdir", "-p", target_path], True)
-        stdout, _ = self.adb.command(['ls', target_path / self.currentTrace.name], run_with_sudo=False, errors_handled_externally=True )
+        stdout, _ = self.adb.command(['ls', target_path / self.currentTrace.name], run_with_sudo=False, errors_handled_externally=True)
 
         if stdout:
             trace_exists_on_device = True
@@ -334,7 +333,6 @@ class MainWindow(QMainWindow):
         self.currentTool = self.pages[PageIndex.TRACE].currentTool
         self.currentTrace = self.pages[PageIndex.TRACE].currentTrace
         self.is_importing = False
-        self.skip_screenshotReplay = False
         self.skip_replay = False
         self.move_to_replay_widget_on_import()
 
@@ -354,15 +352,14 @@ class MainWindow(QMainWindow):
         if self.remove_unsupported_extensions_on_replay and self.currentTool == 'gfxreconstruct':
             extra_args = ["--remove-unsupported"]
         QApplication.processEvents()
-        if self.skip_screenshotReplay:
-            print(f"[ INFO ] Replaying trace..")
-            self.widget_replay.replay(screenshots=False, extra_args=extra_args, local_dir=None)
-        else:
-            print(f"[ INFO ] Generating screenshots..")
+        self.replaySettings = UiReplaySettings()
+        if self.replaySettings.exec():
+            interval = self.replaySettings.getInterval()
+            print("[ INFO ] Generating screenshots..")
             out_path = self.config.get_config()['Paths']['img_path']
             # Go to replay widget
             # self.stacked.setCurrentIndex(PageIndex.REPLAY)
-            self.widget_replay.replay(screenshots="frame_selection", extra_args=extra_args, local_dir=out_path)
+            self.widget_replay.replay(screenshots="interval", extra_args=extra_args, local_dir=out_path, interval=interval)
 
         self.showLoadingScreen()
         if self.widget_replay.errorsLastReplay:

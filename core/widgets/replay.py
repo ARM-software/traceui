@@ -179,7 +179,7 @@ class UiReplayWidget(PageNavigation):
         """
         Go to replay page
         """
-        self.replay_label.setText("Please wait...")
+        self.replay_label.setText("Please check device for potential information if the program remains stuck on this page.")
         self.errorsLastReplay = False
         pkg = self.currentTool.replayer["name"]
         if hasattr(self, "adbWorker"):
@@ -192,8 +192,7 @@ class UiReplayWidget(PageNavigation):
         """
         Set up loading screen
         """
-        self.replay_label = QLabel("Please wait...")
-        self.replay_label.setText("Cleaning up the device and removing old screenshots. Please wait...")
+        self.replay_label = QLabel("Please check device for potential infomation if the program remains stuck on this page.")
         self.replay_label.setAlignment(Qt.AlignCenter)
         self.replay_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #444;")
         self.replay_label.setAlignment(Qt.AlignCenter)
@@ -212,13 +211,14 @@ class UiReplayWidget(PageNavigation):
         self.frame_range_signal.emit()
         self.next_signal.emit(PageIndex.FRAMERANGE)
 
-    def replay(self, screenshots=False, hwc=False, repeat=1, fastforward=False, from_frame=None, to_frame=None, trace=None, local_dir=None, extra_args=[]):
+    def replay(self, screenshots=False, hwc=False, repeat=1, fastforward=False, from_frame=None, to_frame=None, trace=None, interval=10, local_dir=None, extra_args=[]):
         trace_used = self.currentTrace
         if trace is not None:
             trace_used = trace
         self.errorsLastReplay = False
         self.adb.clear_logcat()
         self.currentTool.replay_setup()
+        self.replay_label.setText("Cleaning the device. Please wait.")
 
         self._cleanup_event_loop = QEventLoop()
         self.cleanup_thread = QThread()
@@ -272,12 +272,12 @@ class UiReplayWidget(PageNavigation):
             return self._replay_results
 
         else:
-            self.cmd, data = self.currentTool.replay_start(trace_used, screenshot=screenshots, hwc=hwc, repeat=repeat, extra_args=extra_args, from_frame=from_frame, to_frame=to_frame)
+            self.cmd, data = self.currentTool.replay_start(trace_used, screenshot=screenshots, hwc=hwc, repeat=repeat, extra_args=extra_args, from_frame=from_frame, to_frame=to_frame, interval=interval)
 
             if self.currentTool.plugin_name == "patrace":
-                with open(f'tmp/replay_args.json', 'w') as outfile:
+                with open('tmp/replay_args.json', 'w') as outfile:
                     json.dump(data, outfile, indent=2)
-                self.adb.push(f'tmp/replay_args.json', '/sdcard/devlib-target/')
+                self.adb.push('tmp/replay_args.json', '/sdcard/devlib-target/')
             print("[ INFO ] Currently replaying the thread.")
             QApplication.processEvents()
 
@@ -290,7 +290,7 @@ class UiReplayWidget(PageNavigation):
             self.adbWorker.result_ready.connect(self.adbWorker.pullPictures)
             self.adbWorker.result_ready.connect(self._handle_result_ready)
             self.adbWorker.replay_started.connect(lambda: self.replay_label.setText("Replay has started. Please wait..."))
-            if screenshots:
+            if screenshots and interval !=0:
                 self.adbWorker.replay_started.connect(lambda: self.replay_label.setText("Taking screenshots while replaying. Please wait..."))
             self.adbWorker.move_pictures.connect(lambda: self.replay_label.setText("Renaming screenshots. Please wait..." ))
             self.adbWorker.pull_pictures.connect(lambda: self.replay_label.setText("Pulling pictures from device to local tmp directory. Please wait..."))

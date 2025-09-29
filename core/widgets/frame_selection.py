@@ -87,7 +87,7 @@ class UiFrameSelectionWidget(PageNavigation):
         """
         label_informing = QLabel("Please write frame numbers you would like to use")
         label_informing.setStyleSheet("font-size: 18px; font-weight: bold; color: #444;")
-        label_format = QLabel("Format: <frame_num1>-<frame_num2>-<frame_num3>")
+        label_format = QLabel("Format: single number or comma separeted for multiple frames. eg 5,10,15")
         label_informing.setAlignment(Qt.AlignCenter)
         label_format.setAlignment(Qt.AlignCenter)
         self.frame_input = QLineEdit()
@@ -116,9 +116,9 @@ class UiFrameSelectionWidget(PageNavigation):
         msg = QMessageBox()
 
         string_frame = self.frame_input.text()
-        string_list = string_frame.split("-")
+        string_list = string_frame.split(",")
         if len(string_list) and string_list[0] == '':
-            msg.setText("Incorrect format. Format is <frame_num1>-<frame_num2>-<frame_num3>")
+            msg.setText("Incorrect format. Format is 'num1,num2,num3")
             msg.exec()
             return
         int_list = []
@@ -437,6 +437,7 @@ class UiFrameSelectionWidget(PageNavigation):
                 repeat=1,
                 fastforward=False,
                 from_frame=self.frame_num_list,
+                to_frame=max(self.frame_num_list),
                 extra_args=[],
         )
         for path in results['screenshot_path']:

@@ -1,0 +1,8 @@
+*.pyc
+*.ini
+artifacts/
+data
+NOTES
+tmp/
+outputs/
+.cached

@@ -41,7 +41,6 @@ class tracetool(object):
         self.base = None
         self.sdcard_working_dir = Path('/sdcard/devlib-target/')
         self.capture_root_dir = Path('/data/gfxr/')
-        self.capture_app_dir = None
         self.capture_file_fullpath = None
         self.capture_file_name = None
         self.device_layer_debug_root = Path("/data/local/debug/vulkan/")
@@ -89,18 +88,19 @@ class tracetool(object):
         self.adb.setprop('debug.gfxrecon.capture_file_timestamp', 'false')
         self.adb.setprop('debug.gfxrecon.capture_frames', "''")
         # TODO: Update the capture_file_name when capture_frames is set
-        self.capture_app_dir = self.capture_root_dir / app
-        self.adb.command(['mkdir', '-p', self.capture_app_dir], True)
-        self.adb.command(['chmod', 'o+rw', self.capture_app_dir], True)
-        self.adb.command(['chcon', 'u:object_r:app_data_file:s0:c512,c768', self.capture_app_dir], True)
+
+        self.adb.command(['mkdir', '-p', self.capture_root_dir], True)
+        self.adb.command(['chmod', 'o+rw', self.capture_root_dir], True)
+        self.adb.command(['chcon', 'u:object_r:app_data_file:s0:c512,c768', self.capture_root_dir], True)
         self.capture_file_name = self.__generate_trace_name(app)
-        self.capture_file_fullpath = self.capture_app_dir / self.capture_file_name
+        self.capture_file_fullpath = self.capture_root_dir / self.capture_file_name
         self.adb.setprop('debug.gfxrecon.capture_file', self.capture_file_fullpath)
         print(
             f"[ INFO ] GFXReconstruct output trace file to: {self.capture_file_fullpath}")
         self.adb.delete_file(self.capture_file_fullpath)
 
-        self.adb.setprop('debug.gfxrecon.page_guard_separate_read', 'false')
+        # causes corruptions for UE
+        #self.adb.setprop('debug.gfxrecon.page_guard_separate_read', 'false')
 
         # Retrieve the app "layer path" to put the capture layer in
         device_layer_path_so = device_layer_path / 'libVkLayer_gfxreconstruct.so'
@@ -163,8 +163,6 @@ class tracetool(object):
         """
         result, _ = self.adb.command([f"ps -A | grep {app}"])
         stdout, _ = self.adb.command([f"pm list package -f | grep {app}"])
-        package_path = Path(stdout.split('\n')[0][8:]).parent
-        device_app_layer_path = package_path / 'lib' / 'arm64' / 'libVkLayer_gfxreconstruct.so'
 
         layers_enabled, _ = self.adb.command(
             ['settings', 'get', 'global', 'enable_gpu_debug_layers'])
@@ -249,7 +247,7 @@ class tracetool(object):
         self.adb.clear_logcat()
 
     def replay_start(self, file, screenshot=False, hwc=False,
-                     repeat=1, device=None, extra_args=[], from_frame=None, to_frame=""):
+                     repeat=1, device=None, extra_args=[], from_frame=None, to_frame="", interval=10):
         """
         Does replay from start to finish. Returns paths to the results.
 
@@ -302,12 +300,15 @@ class tracetool(object):
                     '--screenshot-format', "png",
                 ])
                 # support added in r4p1. Uncomment line after release
-                if screenshot == "frame_selection":
-                    cmd.extend(["--screenshot-interval", "10"])
                 #TODO: Check if this is all needed for FF generation
-                elif screenshot == "fastforward":
+                if screenshot == "specific_framerange":
                     cmd.remove("--screenshot-all")
                     cmd.extend([f'--screenshots {from_frame}-{to_frame}'])
+                elif screenshot == "interval":
+                    if interval == 0:
+                        cmd.remove("--screenshot-all")
+                    else:
+                        cmd.extend(["--screenshot-interval", f"{interval}"])
                 elif screenshot == "selecting_frames" and isinstance(from_frame, list):
                     from_frame.sort()
                     total_range = ",".join([f"{f + 1}" for f in from_frame])

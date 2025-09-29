@@ -167,7 +167,7 @@ class UiFastForwardWidget(PageNavigation):
         done_widget = QWidget()
         self.finished_label.setAlignment(Qt.AlignCenter)
         self.result_label.setAlignment(Qt.AlignCenter)
-        self.generate_hwc = QPushButton("Generate HWC")
+        self.generate_hwc = QPushButton("Validate Performance of FastForwarded Trace(s)")
         self.generate_hwc.clicked.connect(self.generateHWC)
 
         v_layout = QVBoxLayout()
@@ -208,7 +208,10 @@ class UiFastForwardWidget(PageNavigation):
         """
         final_string = ""
         for frame in self.frames:
-            string_h = f"Diffs detected in fast forward that starts at frame {frame}: \n"
+            if hwc_dict[frame]['ff_hwc_diffs']['diffs']:
+                string_h = f"Diffs detected in fast forward that starts at frame {frame}: \n"
+            else:
+                string_h = f"No diffs detected"
             for diff in hwc_dict[frame]['ff_hwc_diffs']['diffs']:
                 new_line = f"src_frame: {diff['source_frame']} ff_frame: {diff['ff_frame']} Metric: {diff['metric']} "
                 new_line = new_line + f"Diffs percentage: {diff['diff_percentage']} Diff Ratio: {diff['diff_ratio']} \n"
@@ -273,11 +276,11 @@ class UiFastForwardWidget(PageNavigation):
 
             self.waiting_label.setText(f"Getting screenshots of fast fastforward from trace number {self.frames[i]} ({i +1}/{len(self.frames)})")
             result_ff = self.replay_widget.replay(
-                screenshots="fastforward",
+                screenshots="specific_framerange",
                 hwc=False,
                 repeat=1,
                 fastforward=False,
-                to_frame=self.framerange_end,
+                to_frame=5,
                 extra_args=[],
                 trace = ff_trace,
             )
@@ -286,12 +289,12 @@ class UiFastForwardWidget(PageNavigation):
 
         self.waiting_label.setText("Getting screenshots of original trace")
         result_original = self.replay_widget.replay(
-            screenshots="fastforward",
+            screenshots="specific_framerange",
             hwc=False,
             repeat=1,
             fastforward=False,
             from_frame=min(self.frames),
-            to_frame=self.framerange_end,
+            to_frame=max(self.frames)+5,
             extra_args=[],
             trace = original_trace,
         )

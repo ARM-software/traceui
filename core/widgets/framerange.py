@@ -254,7 +254,6 @@ class UiFrameRangeWidget(PageNavigation):
         msg.setText(msg_text)
         msg.exec()
         self.download_status.clear()
-        self.download_button.clicked.disconnect()
 
     def updateFocus(self, img):
         """
