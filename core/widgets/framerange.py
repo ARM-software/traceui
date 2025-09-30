@@ -1,7 +1,7 @@
 from pathlib import Path
 import os
 from core.config import ConfigSettings
-from PySide6.QtCore import Qt, Signal, QEventLoop, QThread, QObject
+from PySide6.QtCore import Qt, Signal, QEventLoop, QThread, QObject, QRect
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QLineEdit, QPushButton, QFormLayout, QScrollArea, QAbstractButton, QMessageBox
 from core.page_navigation import PageNavigation, PageIndex
@@ -29,18 +29,29 @@ class PixMapHelper(QObject):
 
 
 class ImgButton(QAbstractButton):
+    def __init__(self, pixmap=None, parent=None):
+        super().__init__(parent)
+        self._pixmap = QPixmap(pixmap)
+        self.setCheckable(True)
 
-    def __init__(self, pixmap, parent=None):
-        super(ImgButton, self).__init__(parent)
-        self.pixmap = pixmap
+    def pixmap(self):
+        return QPixmap(self._pixmap)
+
+    def img(self):
+        return self.pixmap()
+
+    def sizeHint(self):
+        return self._pixmap.size()
 
     def paintEvent(self, event):
-        """
-        Draw image to button size and draw red border around button if checked
-        """
         painter = QPainter(self)
         try:
-            painter.drawPixmap(self.rect(), self.pixmap)
+            if not self._pixmap.isNull():
+                target_size = self._pixmap.size().scaled(self.size(), Qt.KeepAspectRatio)
+                x = (self.width()  - target_size.width())  // 2
+                y = (self.height() - target_size.height()) // 2
+                target_rect = QRect(x, y, target_size.width(), target_size.height())
+                painter.drawPixmap(target_rect, self._pixmap)
 
             if self.isChecked():
                 pen = QPen(QColor("red"), 3)
@@ -49,20 +60,6 @@ class ImgButton(QAbstractButton):
                 painter.drawRect(self.rect().adjusted(1, 1, -1, -1))
         finally:
             painter.end()
-
-
-    def sizeHint(self):
-        """
-        Return size of images
-        """
-        return self.pixmap.size()
-
-    def img(self):
-        """
-        Return image
-        """
-        return self.pixmap
-
 
 class UiFrameRangeWidget(PageNavigation):
     gotoframeselection_signal = Signal()
@@ -157,7 +154,10 @@ class UiFrameRangeWidget(PageNavigation):
 
     def updatePictureWidgets(self):
         if self.images:
-            self.frame_focus.setPixmap(QPixmap(self.images[0]).scaled(800, 450))
+            self.frame_focus = QLabel()
+            pixmap = QPixmap(self.images[0])
+            scaled_pixmap = pixmap.scaledToHeight(450)
+            self.frame_focus.setPixmap(scaled_pixmap)
             self.frame_focus.setAlignment(Qt.AlignCenter)
             self.download_status.setAlignment(Qt.AlignCenter)
             self.framerange_edit_label.hide()
@@ -237,13 +237,17 @@ class UiFrameRangeWidget(PageNavigation):
         Return:
             frame_scroll: scrollable widget with frames as buttons
         """
-        # Rebuild timeline
-        for pixmap in self.pixmaps:
-            b = ImgButton(pixmap.scaled(400, 225))
-            b.setCheckable(True)
-            b.setAutoExclusive(True)
-            b.clicked.connect(self.updateFocus)
-            self.frame_timeline.addWidget(b)
+        for pm in self.pixmaps:
+            btn = ImgButton(pm)
+            if pm.height() >= pm.width():
+                btn.setFixedHeight(400)
+                btn.setMinimumWidth(300)
+            else:
+                btn.setFixedWidth(400)
+                btn.setMinimumHeight(50)
+            btn.setAutoExclusive(True)
+            btn.clicked.connect(self.updateFocus)
+            self.frame_timeline.addWidget(btn)
 
     def downloadTrace(self):
         self.download_status.setText("Currently downloading. Please wait...")
@@ -267,7 +271,7 @@ class UiFrameRangeWidget(PageNavigation):
                     self.current_focus_image_index = self.image_indices[i]
                     self.framerange_frame.setText("Frame: {}".format(self.current_focus_image_index))
 
-        self.frame_focus.setPixmap(QPixmap(img).scaled(800, 450))
+        self.frame_focus.setPixmap(QPixmap(img).scaledToHeight(450))
 
     def setStartFrame(self):
         """
@@ -358,7 +362,8 @@ class UiFrameRangeWidget(PageNavigation):
         self.current_range_start = 0
         self.current_range_end = 0
         self.framerange_input.clear()
-
+        if self.frame_focus is not None:
+            self.frame_focus.clear()
         self.resetVisibility()
 
     def resetVisibility(self):
@@ -370,7 +375,8 @@ class UiFrameRangeWidget(PageNavigation):
             self.framerange_input.hide()
             self.start_select_button.show()
             self.end_select_button.show()
-            self.frame_focus.show()
+            if hasattr(self, "frame_focus"):
+                self.frame_focus.show()
             self.download_button.show()
             if hasattr(self, "missing_img"):
                 self.missing_img.hide()
