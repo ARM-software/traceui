@@ -333,6 +333,7 @@ class UiTraceWidget(PageNavigation):
             self.loading_signal.emit()
             QApplication.processEvents()
 
+            self.plugins[self.currentTool].adb = self.adb
             # Set up device and start prosess
             self.plugins[self.currentTool].trace_setup_device(self.currentApp)
             print(f"[ INFO ] Device was set up for tracing '{self.currentApp}' using '{self.currentTool}")

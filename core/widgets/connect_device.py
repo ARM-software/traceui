@@ -23,7 +23,6 @@ class UIConnectDevice(PageNavigation):
         """
         super().__init__()
         self.adb = adb
-        self.adb.init()  # In case a device has been connected / disconnected
         self.setUpWidgets()
         self.setUpLayout()
         self.refresh()

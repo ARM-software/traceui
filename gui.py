@@ -312,6 +312,11 @@ class MainWindow(QMainWindow):
 
     def move_to_start_widget(self):
         """ Catches a signal (trace_start_signal) and moves to the tracing widget"""
+        self.adb = self.widget_connect.adb
+        self.widget_replay.adb = self.adb
+        self.widget_base.adb = self.adb
+        self.widget_trace.adb = self.adb
+        self.widget_import.adb = self.adb
         self.showLoadingScreen()
         self.stacked.setCurrentIndex(PageIndex.START)
 

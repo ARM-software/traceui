@@ -217,6 +217,7 @@ class UiReplayWidget(PageNavigation):
             trace_used = trace
         self.errorsLastReplay = False
         self.adb.clear_logcat()
+        self.currentTool.adb = self.adb
         self.currentTool.replay_setup()
         self.replay_label.setText("Cleaning the device. Please wait.")
 
