@@ -318,8 +318,10 @@ class tracetool(object):
                 # replayer produces .bmp - should be converted to .png
 
             if hwc:
-                self.__setup_hwcpipe_layer()
-
+                try:
+                    self.__setup_hwcpipe_layer()
+                except FileNotFoundError:
+                    return None, None
             cmd.extend(['-m', 'rebind'] + extra_args + [str(file)])
         return cmd, file
 

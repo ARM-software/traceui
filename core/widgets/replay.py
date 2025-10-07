@@ -274,6 +274,8 @@ class UiReplayWidget(PageNavigation):
         else:
             self.cmd, data = self.currentTool.replay_start(trace_used, screenshot=screenshots, hwc=hwc, repeat=repeat, extra_args=extra_args, from_frame=from_frame, to_frame=to_frame, interval=interval)
 
+            if self.cmd == None and data == None:
+                return None
             if self.currentTool.plugin_name == "patrace":
                 with open('tmp/replay_args.json', 'w') as outfile:
                     json.dump(data, outfile, indent=2)

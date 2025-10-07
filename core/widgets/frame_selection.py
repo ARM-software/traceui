@@ -303,6 +303,9 @@ class UiFrameSelectionWidget(PageNavigation):
             to_frame=self.framerange_end,
             extra_args=extra_args,
         )
+        if results == None:
+            self.waiting_label.setText("Cannot set up hwc pipe layer on the device. Device may be unrooted")
+            return
         desired_output_dir = self._hwcHelper(results)
         if self.expected_local_output is None:
             self.errorHWCHandeling()
