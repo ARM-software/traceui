@@ -7,7 +7,8 @@ import subprocess
 
 from core.config import ConfigSettings
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QEventLoop
-from PySide6.QtWidgets import QLabel, QWidget, QVBoxLayout, QPushButton, QStackedWidget
+from PySide6.QtWidgets import QLabel, QWidget, QVBoxLayout, QPushButton, QStackedWidget, QScrollArea, QHBoxLayout
+from PySide6.QtGui import QPixmap
 
 class FastForwardWorker(QObject):
     """
@@ -170,11 +171,26 @@ class UiFastForwardWidget(PageNavigation):
         self.generate_hwc = QPushButton("Validate Performance of FastForwarded Trace(s)")
         self.generate_hwc.clicked.connect(self.generateHWC)
 
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setFixedWidth(1000)
+        self.scroll_area.setFixedHeight(500)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+
+        self.scroll_layout = QHBoxLayout()
+        self.scroll_layout.setAlignment(Qt.AlignCenter)
+        scrolling_widget = QWidget()
+        scrolling_widget.setLayout(self.scroll_layout)
+        self.scroll_area.setWidget(scrolling_widget)
+
         v_layout = QVBoxLayout()
         v_layout.addStretch()
         v_layout.addWidget(self.finished_label)
         v_layout.addWidget(self.result_label)
+        v_layout.addWidget(self.scroll_area)
         v_layout.addWidget(self.generate_hwc)
+        v_layout.setAlignment(Qt.AlignCenter)
         v_layout.addStretch()
         done_widget.setLayout(v_layout)
 
@@ -319,6 +335,22 @@ class UiFastForwardWidget(PageNavigation):
         print("[ INFO ] Comparison is completed")
         self.displayComparisonResult()
 
+    def _cleanup_scroll(self):
+        while self.scroll_layout.count():
+            item = self.scroll_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+            else:
+                child_layout = item.layout()
+                if child_layout is not None:
+                    while child_layout.count():
+                        sub_item = child_layout.takeAt(0)
+                        sub_widget = sub_item.widget()
+                        if sub_widget:
+                            sub_widget.setParent(None)
+                            sub_widget.deleteLater()
 
     def cleanup_page(self):
         """
@@ -333,25 +365,43 @@ class UiFastForwardWidget(PageNavigation):
         self.result_label.clear()
         self.ff_traces = None
         self.waiting_label.setText("Please wait...")
+        self._cleanup_scroll()
 
     def displayComparisonResult(self):
         """
         Set label to display which frames differ
         """
         diff_detected = False
-        tmp_string = ""
+        tmp_string = "Check terminal output for details\n"
 
         for num in self.frames:
             if len(self.image_diffs[num]):
                 diff_detected = True
-                tmp_string = tmp_string + f"Image diff detected in fast forward trace {num}:\n"
+                if self.scroll_area.isHidden():
+                    self.scroll_area.show()
+                tmp_string = tmp_string + f"Image diff detected in fast forward trace {num}!\n"
+
                 for i in range(len(self.image_diffs[num])):
-                    first_file = self.image_diffs[num][i][0].split('/')[-1]
-                    second_file = self.image_diffs[num][i][1].split('/')[-1]
-                    third_file = self.image_diffs[num][i][2].split('/')[-1]
-                    tmp_string = tmp_string + f" Diff in {first_file} when comparing {second_file} to {third_file}\n"
+                    number_label = QLabel(f"Diff frame from FF starting at frame {num}")
+                    number_label.setAlignment(Qt.AlignCenter)
+                    path_label = QLabel(f"{self.image_diffs[num][i][0]}")
+                    path_label.setAlignment(Qt.AlignCenter)
+                    img = QPixmap(self.image_diffs[num][i][0]).scaledToHeight(400)
+                    label = QLabel()
+                    label.setPixmap(img)
+                    label.setAlignment(Qt.AlignCenter)
+                    vertical_layout = QVBoxLayout()
+                    horizontal.addWidget(number_label)
+                    horizontal.addWidget(label)
+                    horizontal.addWidget(path_label)
+                    horizontal.setAlignment(Qt.AlignCenter)
+                    total_widget = QWidget()
+                    total_widget.setLayout(horizontal)
+                    self.scroll_layout.addWidget(total_widget)
+
         if not diff_detected:
             tmp_string = "No difference detected between the original trace and the fast forward trace(s)!"
+            self.scroll_area.hide()
         self.result_label.setText(tmp_string)
 
     def _get_result(self, result):
