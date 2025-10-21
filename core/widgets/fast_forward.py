@@ -255,6 +255,15 @@ class UiFastForwardWidget(PageNavigation):
         self.setHWCResultLabel(hwc_dict)
         self.nestedStack.setCurrentIndex(self.PAGE_POSTHWC)
 
+    def _get_frame_list(self):
+        """
+        Helper function to add all frame numbers to screenshot
+        """
+        frames = set()
+        for start_frame in self.frames:
+            for i in range(0,5):
+                frames.add(start_frame + i)
+        return list(frames)
 
     def performFastForward(self):
         """
@@ -303,14 +312,14 @@ class UiFastForwardWidget(PageNavigation):
 
             screenshots_ff[self.frames[i]] = result_ff
 
+        frame_list = self._get_frame_list()
         self.waiting_label.setText("Getting screenshots of original trace")
         result_original = self.replay_widget.replay(
-            screenshots="specific_framerange",
+            screenshots="selecting_frames",
             hwc=False,
             repeat=1,
             fastforward=False,
-            from_frame=min(self.frames),
-            to_frame=max(self.frames)+5,
+            from_frame=frame_list,
             extra_args=[],
             trace = original_trace,
         )
