@@ -11,12 +11,20 @@ class PixMapHelper(QObject):
     results = Signal(object)
     finished = Signal()
 
-    def __init__(self, images):
+    def __init__(self, images, remove_alpha=False):
         super().__init__()
         self.images = images
+        self.remove_alpha = remove_alpha
 
     def makePictures(self):
         list_imgs = []
+        if not len(self.images):
+            self.finished.emit()
+            return
+        if self.remove_alpha:
+            base_path = str(Path(self.images[0]).parent)
+            cmd = ["mogrify", "-alpha", "off", f"{base_path}/*.png"]
+            process = subprocess.run(" ".join(cmd), shell=True, capture_output=True)
         for img in self.images:
             pixmap = QPixmap(img)
             if pixmap.isNull():
@@ -84,9 +92,10 @@ class UiFrameRangeWidget(PageNavigation):
         self.end_select_button = QPushButton("End")
         self.download_button = QPushButton("Download trace")
         self.continue_select_button = QPushButton("End")
+        self.remove_alpha = QPushButton("Transparent images? Remove alpha channels")
         self.frame_focus = QLabel()
         self.missing_img = QLabel()
-        self.download_status = QLabel()
+        self.status = QLabel()
 
         self.frame_scroll = QScrollArea()
         self.frame_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -143,6 +152,7 @@ class UiFrameRangeWidget(PageNavigation):
         self.framerange_label.setText("Current framerange: 0-0")
         self.framerange_edit_label.setText("Range override (<start>-<end>): ")
 
+        self.remove_alpha.clicked.connect(self.removeAlpha)
         self.start_select_button.setText("Set to start frame")
         self.start_select_button.clicked.connect(self.setStartFrame)
         self.end_select_button.setText("Set to end frame")
@@ -152,6 +162,33 @@ class UiFrameRangeWidget(PageNavigation):
         self.continue_select_button.setText("Continue")
         self.continue_select_button.clicked.connect(self.frameSelect)
 
+    def removeAlpha(self):
+        self.reloadImages(remove_alpha=True)
+
+    def reloadImages(self, remove_alpha=False):
+        """Reloads images in the scroll area without rebuilding other widgets."""
+        self.status.setText("Reloading images. Please wait...")
+        print("[ INFO ] Reloading images without alpha channels")
+        QApplication.processEvents()
+
+        self.cleanupBoxLayout(self.frame_timeline)
+
+        self.thread = QThread()
+        self.eventloop = QEventLoop()
+        self.worker = PixMapHelper(self.images, remove_alpha=remove_alpha)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.makePictures)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.worker.results.connect(self.thread_completed)
+        self.thread.start()
+        self.eventloop.exec()
+
+        self.createScrollArea()
+
+        self.status.clear()
+
     def updatePictureWidgets(self):
         if self.images:
             self.frame_focus = QLabel()
@@ -159,7 +196,7 @@ class UiFrameRangeWidget(PageNavigation):
             scaled_pixmap = pixmap.scaledToHeight(450)
             self.frame_focus.setPixmap(scaled_pixmap)
             self.frame_focus.setAlignment(Qt.AlignCenter)
-            self.download_status.setAlignment(Qt.AlignCenter)
+            self.status.setAlignment(Qt.AlignCenter)
             self.framerange_edit_label.hide()
             self.framerange_input.hide()
 
@@ -220,7 +257,8 @@ class UiFrameRangeWidget(PageNavigation):
         self.v_layout.addWidget(self.end_select_button)
         self.v_layout.addWidget(self.continue_select_button)
         self.v_layout.addWidget(self.download_button)
-        self.v_layout.addWidget(self.download_status)
+        self.v_layout.addWidget(self.remove_alpha)
+        self.v_layout.addWidget(self.status)
 
         self.setLayout(self.v_layout)
 
@@ -237,6 +275,7 @@ class UiFrameRangeWidget(PageNavigation):
         Return:
             frame_scroll: scrollable widget with frames as buttons
         """
+        self.cleanupBoxLayout(self.frame_timeline)
         for pm in self.pixmaps:
             btn = ImgButton(pm)
             if pm.height() >= pm.width():
@@ -250,14 +289,14 @@ class UiFrameRangeWidget(PageNavigation):
             self.frame_timeline.addWidget(btn)
 
     def downloadTrace(self):
-        self.download_status.setText("Currently downloading. Please wait...")
+        self.status.setText("Currently downloading. Please wait...")
         _pull_helper = AdbThread()
         _pull_helper.fileHandler(adb=self.replay_widget.adb, file=self.replay_widget.currentTrace, path="tmp", action="pull")
         msg = QMessageBox()
         msg_text = f" The trace was downloaded here: {os.getcwd()}/tmp"
         msg.setText(msg_text)
         msg.exec()
-        self.download_status.clear()
+        self.status.clear()
 
     def updateFocus(self, img):
         """
@@ -375,6 +414,7 @@ class UiFrameRangeWidget(PageNavigation):
             self.framerange_input.hide()
             self.start_select_button.show()
             self.end_select_button.show()
+            self.remove_alpha.show()
             if hasattr(self, "frame_focus"):
                 self.frame_focus.show()
             self.download_button.show()
@@ -386,6 +426,7 @@ class UiFrameRangeWidget(PageNavigation):
             self.start_select_button.hide()
             self.end_select_button.hide()
             self.download_button.hide()
+            self.remove_alpha.hide()
             if hasattr(self, "frame_focus"):
                 self.frame_focus.hide()
             if hasattr(self, "missing_img"):
