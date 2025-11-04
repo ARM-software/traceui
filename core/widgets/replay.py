@@ -247,6 +247,7 @@ class UiReplayWidget(PageNavigation):
         self._replay_event_loop = QEventLoop()
 
         if fastforward:
+            self.plugins["fastforward"].adb = self.adb
             self.cmd, output_file = self.plugins["fastforward"].replay_start_fastforward(trace_used, self.currentTool, from_frame=from_frame, to_frame=to_frame)
             extra_args = {
                 "output_file": output_file,
