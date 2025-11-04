@@ -10,6 +10,9 @@ from adblib import print_codes
 
 from core.config import ConfigSettings
 
+from core.logger_config import setup_logger
+
+logger = setup_logger("gfxreconstruct")
 ##########################################################################
 #
 # Tracetool plugin for gfx reconstruct
@@ -96,8 +99,8 @@ class tracetool(object):
         self.capture_file_name = self.__generate_trace_name(app)
         self.capture_file_fullpath = self.capture_root_dir / self.capture_file_name
         self.adb.setprop('debug.gfxrecon.capture_file', self.capture_file_fullpath)
-        print(
-            f"[ INFO ] GFXReconstruct output trace file to: {self.capture_file_fullpath}")
+        logger.info(
+            f"GFXReconstruct output trace file to: {self.capture_file_fullpath}")
         self.adb.delete_file(self.capture_file_fullpath)
 
         # causes corruptions for UE
@@ -120,13 +123,13 @@ class tracetool(object):
             ) / self.basepath / self.dirname / adb_config_abi.split(',')[0]
         # Ensure layer exists in local path
         if not layer_path.exists():
-            print("[ ERROR ] Trace layer not found on local device")
+            logger.error("Trace layer not found on local device")
             raise Exception(f"Layer not found in {layer_path}")
             # TODO return to previous page and inform user
 
         # Put the layer at the right package/app
         self.adb.delete_file(device_layer_path_so)
-        print(f"[ INFO ] Pushing layer: {layer_path} to {device_layer_path}")
+        logger.debug(f"Pushing layer: {layer_path} to {device_layer_path}")
         self.adb.push(str(layer_path), str(device_layer_path))
         # (If this fails try putting the layer at this location insted: /data/local/debug/vulkan)
 
@@ -195,9 +198,9 @@ class tracetool(object):
         stdout, _ = self.adb.command([f"ps -A | grep {app}"])
         if app in stdout:
             self.adb.command([f'am force-stop {app}'], True)
-            print(f"[ INFO ] Stopped '{app}'")
+            logger.debug(f"Stopped '{app}'")
         else:
-            print(f"[ INFO ] App ({app}) is already stopped")
+            logger.debug(f"App ({app}) is already stopped")
 
         self.adb.command(['chmod', 'o+rw', self.capture_file_fullpath], True)
         self.adb.pull(self.capture_file_fullpath, 'tmp')
@@ -219,15 +222,15 @@ class tracetool(object):
         Returns:
             Path: Path to trace on remote device
         """
-        print(f"[ INFO ] Running optimizer on {trace}")
+        logger.info(f"Running optimizer on {trace}")
         optimized_trace = f"tmp/{Path(trace).stem}.optimized.gfxr"
         cmd = [str(self.basepath / self.replayer['optimizer']), trace, optimized_trace]
         subprocess.run(" ".join(cmd), shell=True, capture_output=True)
         if Path(optimized_trace).is_file(): # TODO Add more sophisticated error handling reading the output of the optimizer
-            print(f"[ INFO ] Trace optimized {optimized_trace}")
+            logger.info(f"Trace optimized {optimized_trace}")
             return optimized_trace
         else:
-            print(f"[ ERROR ] Trace: {trace} failed to optimize!")
+            logger.error(f"Trace: {trace} failed to optimize!")
             return None
 
     # Replay commands
@@ -276,7 +279,7 @@ class tracetool(object):
             # Delete existing hwc data as this can lead to dangerous mixups on replay failure
             # TODO: Remove this when we properly detect success/failure on
             # replay
-            print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] Removing any old HWCPipe results to avoid mixups. We should stop doing this when replay plugins detect failures in a robust manner.")
+            logger.warning(f"Removing any old HWCPipe results to avoid mixups. We should stop doing this when replay plugins detect failures in a robust manner.")
             self.adb.command(['setenforce', '0'], True)
             self.adb.command(
                 ['rm', hwcpipe_layer_result_mask],
@@ -351,22 +354,22 @@ class tracetool(object):
             if "E gfxrecon: fopen(" in line:
                 estring = "WARNING: App may lack write permissions to output folder, check logcat/shell for more info.\n"
                 if estring not in err_lines:
-                    print(f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] Found: {line} in logcat, potential source of the error. App may lack write permissions to the output folder.")
+                    logger.error(f"Found: {line} in logcat, potential source of the error. App may lack write permissions to the output folder.")
                     err_lines.append(estring)
 
             if "W gfxrecon: Extension " in line:
-                print(
-                    f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] Extension missing on replay device, replay may fail: {line}")
+                logger.warning(
+                    f"Extension missing on replay device, replay may fail: {line}")
                 extension_missing_lines.append(line)
 
             if "F gfxrecon: API call at index:" in line:
                 if "VK_ERROR_EXTENSION_NOT_PRESENT" in line:
-                    print(f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] API call failed on replay:{line}, due to missing extension. Potential culprits: {extension_missing_lines}")
+                    logger.error(f"API call failed on replay:{line}, due to missing extension. Potential culprits: {extension_missing_lines}")
                     err_lines.append(
                         f"ERROR: API call failed on replay:\n{line}, due to missing extension.\nPotential culprits: {extension_missing_lines}\n")
                 else:
-                    print(
-                        f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] API call failed on replay: {line}")
+                    logger.error(
+                        f"API call failed on replay: {line}")
                     err_lines.append(
                         f"ERROR: API call failed on replay:\n{line}\n")
 
@@ -390,7 +393,7 @@ class tracetool(object):
         testfile = f"{device_layer_path}/testfile.txt"
         stdout, _ = self.adb.command(['touch', testfile], run_with_sudo=True,  errors_handled_externally=True)
         if not stdout:
-            print(f"[ {print_codes.SUCCESS}INFO{print_codes.END_CODE} ] Using debug directory instead")
+            logger.debug(f"Using debug directory instead")
             device_layer_path = self.device_layer_debug_root
             self.adb.command(['mkdir', '-p', device_layer_path], True)
         return device_layer_path
@@ -408,8 +411,8 @@ class tracetool(object):
 
         device_layer_path = self.__get_device_package_layer_path(
             self.replayer['name'])
-        print(
-            f"[ INFO ] Pushing layer {expected_lib_path} to {device_layer_path}")
+        logger.debug(
+            f"Pushing layer {expected_lib_path} to {device_layer_path}")
         self.adb.push(str(expected_lib_path), str(device_layer_path))
 
         self.adb.command([f'chmod 755 {device_layer_path}'], True)

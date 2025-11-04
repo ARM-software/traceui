@@ -18,7 +18,9 @@ import random
 import pandas
 
 from adblib import print_codes
+from core.logger_config import setup_logger
 
+logger = setup_logger("frame_selection")
 
 GPU_ACTIVE_SAMPLE_INDEX = 0
 LARGE_NUMBER = 99999999999999999999999999999
@@ -35,7 +37,7 @@ def process_hwc(csv_file):
     data = pandas.read_csv(csv_file)
     data.fillna(0, inplace=True)
     if "GPU active cycles" not in data.columns:
-        print(f"[ WARNING ] GPU active counter is missing. Setting counters to 0.")
+        logger.warning(f"GPU active counter is missing. Setting counters to 0.")
         data["GPU active cycles"] = 0
 
     # Just sum everything for now, figure out what to include properly later
@@ -102,12 +104,12 @@ def select_frames(per_frame_hwc_data, frame_range_start=0, frame_range_end=LARGE
     frame_vector_samples = process_hwc(per_frame_hwc_data)
 
     if not len(frame_vector_samples):
-        print(f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] Input sample CSV is empty, cant select any frames.")
+        logger.error(f"Input sample CSV is empty, cant select any frames.")
         return None
 
     num_frames = len(frame_vector_samples)
 
-    print(f"[ INFO ] Running frame selection on dataset containing {num_frames} frames")
+    logger.debug(f"Running frame selection on dataset containing {num_frames} frames")
 
     if frame_range_start > num_frames:
         raise Exception(f"Selected start frame {frame_range_start} is bigger than the total number of frames {num_frames}")
@@ -120,7 +122,7 @@ def select_frames(per_frame_hwc_data, frame_range_start=0, frame_range_end=LARGE
 
     frame_vector_samples = frame_vector_samples[frame_range_start: frame_range_end]
 
-    print(f"[ INFO ] Number of frames in frame range: {len(frame_vector_samples)}")
+    logger.debug(f"Number of frames in frame range: {len(frame_vector_samples)}")
 
     normalized_samples = normalize_samples(frame_vector_samples)
 
@@ -149,7 +151,7 @@ def run_k_means(initial_cluster_centers, samples, num_runs=1, tolerance=0.001, m
     iteration = 0
     done = False
     while not done:
-        print(f"[ INFO ] Running KMeans iteration {iteration} with {len(cluster_centers)} clusters.")
+        logger.debug(f"Running KMeans iteration {iteration} with {len(cluster_centers)} clusters.")
 
         done = True
 
@@ -184,10 +186,10 @@ def run_k_means(initial_cluster_centers, samples, num_runs=1, tolerance=0.001, m
         iteration += 1
 
         if iteration > max_iterations:
-            print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] KMeans reached the maximum number of iterations which was {max_iterations}, selected frames may not be great!")
+            logger.warning(f"KMeans reached the maximum number of iterations which was {max_iterations}, selected frames may not be great!")
             done = True
 
-    print(f"[ INFO ] Finished KMeans after {iteration} iterations.")
+    logger.debug(f"Finished KMeans after {iteration} iterations.")
 
     return sample_clusters, cluster_centers
 
@@ -210,7 +212,7 @@ def pick_frames(num_frames, samples, raw_samples, frame_range_start):
     else:
         # Spread the initial centers across the frame samples with even distance.
         # This leads to much better + faster convergence since neighboring frames tend to be similar
-        print(f"[ INFO ] Initializing clusters using step size {step_size} and initial offset {step_init}")
+        logger.debug(f"Initializing clusters using step size {step_size} and initial offset {step_init}")
         for cluster_index in range(num_clusters):
             cluster_centers.append(deepcopy(samples[step_init + cluster_index * step_size]))
 

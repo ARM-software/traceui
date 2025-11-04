@@ -2,14 +2,15 @@ from core.page_navigation import PageNavigation, PageIndex
 from core.frame_selection import select_frames
 from core.adb_thread import AdbThread
 from pathlib import Path
-from adblib import print_codes
 import os
 import json
 
 from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import QLabel, QWidget, QVBoxLayout, QFormLayout, QCheckBox, QPushButton, QMessageBox, QStackedWidget, QButtonGroup, QComboBox, QLineEdit, QHBoxLayout
+from core.logger_config import setup_logger
 
+logger = setup_logger("frame_selection_page")
 
 class UiFrameSelectionWidget(PageNavigation):
     PAGE_PREFRAMESELECT = 0
@@ -202,7 +203,7 @@ class UiFrameSelectionWidget(PageNavigation):
         for line in stdout.splitlines():
             if "mali" in line.lower():
                 return True
-        print(f"[ WARNING ] Not detecting Mali GPU, frame selection will be unavailable!")
+        logger.warning(f"Not detecting Mali GPU, frame selection will be unavailable!")
         return False
 
     def fetch_files_from_device(self, files=None, output_dir=None):
@@ -225,7 +226,7 @@ class UiFrameSelectionWidget(PageNavigation):
         if not output_dir:
             output_dir = self.local_output_dir / Path(self.replay_widget.currentTool.plugin_name)
         for file_path in files:
-            print(f"[ INFO ] Fetching result file: {file_path}")
+            logger.debug(f"Fetching result file: {file_path}")
             stdout, _ = self.replay_widget.adb.command(
                 [f"if [ -f {file_path} ]; then echo true; else echo false; fi"])
             if stdout == 'true':
@@ -233,8 +234,8 @@ class UiFrameSelectionWidget(PageNavigation):
                 self.replay_widget.adb.pull(file_path, output_dir)
                 outputs.append(output_dir / Path(file_path))
             else:
-                print(
-                    f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] Result file: {file_path} does not exist on device")
+                logger.error(
+                    f"Result file: {file_path} does not exist on device")
 
         return outputs
 
@@ -246,17 +247,17 @@ class UiFrameSelectionWidget(PageNavigation):
         if not os.path.exists(desired_output_dir):
             os.makedirs(desired_output_dir)
 
-        print(f"[ INFO ] Storing frame selection results in: {str(desired_output_dir)}")
+        logger.info(f"Storing frame selection results in: {str(desired_output_dir)}")
 
         if not results.get("hwc_path"):
-            print(f"[ ERROR ] Frame selection post processing failed. No HWC results found after replay.")
+            logger.error(f"Frame selection post processing failed. No HWC results found after replay.")
         else:
             self.fetch_files_from_device(files=results["hwc_path"], output_dir=desired_output_dir)
             self.expected_local_output = os.path.join(desired_output_dir, os.path.basename(results["hwc_path"]))
             if not os.path.exists(self.expected_local_output):
-                print(f"[ ERROR ] HWC data generation failed, expected output does not exist: {self.expected_local_output}")
+                logger.error(f"HWC data generation failed, expected output does not exist: {self.expected_local_output}")
             else:
-                print(f"[ INFO ] HWC data generated successfully! Stored locally in: {self.expected_local_output}")
+                logger.info(f"HWC data generated successfully! Stored locally in: {self.expected_local_output}")
             return desired_output_dir
 
     def errorHWCHandeling(self):
@@ -307,13 +308,13 @@ class UiFrameSelectionWidget(PageNavigation):
             self.errorHWCHandeling()
             return
         if self.frames_amount:
-            print(f"[ INFO ] Selecting {self.frames_amount} frames")
+            logger.info(f"Selecting {self.frames_amount} frames")
             self.frames = select_frames(self.expected_local_output, self.framerange_start, self.framerange_end, self.frames_amount)
         else:
             self.cleanup_page()
 
         if not self.frames:
-            print("[ ERROR ] Frame Selection failed")
+            logger.error("Frame Selection failed")
             msg = QMessageBox()
             msg.setText("Frame selection failed. Please try again.")
             msg.exec()
@@ -323,14 +324,14 @@ class UiFrameSelectionWidget(PageNavigation):
         with open(frame_selection_json, 'w') as outfile:
             json.dump(self.frames, outfile, indent=2)
 
-        print(f"[ INFO ] Representative frame details:")
-        print(json.dumps(self.frames, indent=2))
+        logger.debug(f"Representative frame details:")
+        logger.debug(json.dumps(self.frames, indent=2))
 
-        print(f"[ INFO ] Results stored in: {frame_selection_json}")
+        logger.info(f"Results stored in: {frame_selection_json}")
         _pull_helper = AdbThread()
         _pull_helper.fileHandler(adb=self.replay_widget.adb, file=self.replay_widget.currentTrace, path=desired_output_dir, action="pull")
         self.location_label.setText(f"Location of trace and selected frame information: {os.getcwd()}/{desired_output_dir}")
-        print("[ INFO ] Frame selection is completed.")
+        logger.info("Frame selection is completed.")
         self.frame_num_list = []
         for i in range(len(self.frames)):
             self.frame_num_list.append(self.frames[i]["frame"])
@@ -445,7 +446,7 @@ class UiFrameSelectionWidget(PageNavigation):
             path_file = f"tmp/{path.split('/')[-1]}"
             pixmap = QPixmap(path_file)
             if pixmap.isNull():
-                print(f"[ INFO ] Unable to load image: {path_file}")
+                logger.debug(f"Unable to load image: {path_file}")
                 continue
             if (pixmap.height() >= pixmap.width()):
                 scaled_pixmap = pixmap.scaledToHeight(700)

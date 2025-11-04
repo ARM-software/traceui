@@ -24,7 +24,9 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QStackedWidge
                                QMessageBox, QHBoxLayout, QPushButton, QSizePolicy)
 
 from adblib import print_codes
+from core.logger_config import setup_logger
 
+logger = setup_logger("gui")
 
 class MainWindow(QMainWindow):
     def __init__(self, adb, plugins):
@@ -58,6 +60,7 @@ class MainWindow(QMainWindow):
 
         self.loadMenubar()
         self.cleanupTmpReplayImgDir()
+
 
     def set_page(self, index):
         """
@@ -266,10 +269,10 @@ class MainWindow(QMainWindow):
             self.helper_thread = AdbThread()
             self.helper_thread.fileHandler(adb=self.adb, file=self.currentTrace, path=target_path, track=self.widget_import.delete_trace_on_shutdown, action="push")
         elif trace_exists_on_device:
-            print(f"[ INFO ] Skipping upload of trace file: {self.currentTrace} to device folder {target_path} because it already exists on the target device")
+            logger.info(f"Skipping upload of trace file: {self.currentTrace} to device folder {target_path} because it already exists on the target device")
         self.currentTrace = target_path / os.path.basename(self.currentTrace)
 
-        print(f"[ INFO ] Trace path on device is: {self.currentTrace}")
+        logger.info(f"Trace path on device is: {self.currentTrace}")
 
         self.configureReplayWidget()
 
@@ -363,7 +366,7 @@ class MainWindow(QMainWindow):
         self.replaySettings = UiReplaySettings()
         if self.replaySettings.exec():
             interval = self.replaySettings.getInterval()
-            print("[ INFO ] Generating screenshots..")
+            logger.info("Generating screenshots..")
             out_path = self.config.get_config()['Paths']['img_path']
             # Go to replay widget
             # self.stacked.setCurrentIndex(PageIndex.REPLAY)
@@ -371,7 +374,7 @@ class MainWindow(QMainWindow):
 
         self.showLoadingScreen()
         if self.widget_replay.errorsLastReplay:
-            print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] Replay for was not clean, errors occurred!")
+            logger.warning(f"Replay for was not clean, errors occurred!")
             msg = QMessageBox.question(self, '', "Replay for was not clean, errors occurred! Do you wish to retry replay?", QMessageBox.Yes | QMessageBox.No)
             ret = msg
             if ret == QMessageBox.Yes:
@@ -403,5 +406,5 @@ class MainWindow(QMainWindow):
         """
         path = Path(self.config.get_config()['Paths']['img_path'])
         if path.exists():
-            print("[ INFO ] Deleting local image directory...")
+            logger.info("Deleting local image directory...")
             shutil.rmtree(self.config.get_config()['Paths']['img_path'])

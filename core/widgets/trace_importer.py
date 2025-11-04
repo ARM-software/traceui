@@ -8,7 +8,9 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout, QMessageBox
 from core.page_navigation import PageNavigation, PageIndex
 
-from adblib import print_codes
+from core.logger_config import setup_logger
+
+logger = setup_logger("traceImporter")
 
 
 class UiTraceImportWidget(PageNavigation):
@@ -101,14 +103,14 @@ class UiTraceImportWidget(PageNavigation):
         self.cleanUpImages()
         self.trace = self.importWindow.getTrace()
         if not self.trace:
-            print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] Trace input empty, please provide a trace path")
+            logger.warning(f"Trace input empty, please provide a trace path")
             msg = QMessageBox()
             msg.setText("Please provide a file")
             msg.exec()
             self.cleanup_page()
             return
         elif not os.path.getsize(self.trace):
-            print(f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] File is empty. Please select non-empty trace file")
+            logger.error(f"File is empty. Please select non-empty trace file")
             msg = QMessageBox()
             msg.setText("The provided file was empty. Please provide a non-empty trace file")
             msg.exec()
@@ -127,7 +129,7 @@ class UiTraceImportWidget(PageNavigation):
                 break
 
         if plugin is None:
-            print(f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] Failed to find valid plugin for trace with suffix: {trace_suffix}")
+            logger.error(f"Failed to find valid plugin for trace with suffix: {trace_suffix}")
             raise ValueError(f"Failed to find valid plugin for trace with suffix: {trace_suffix}")
 
         ConfigSettings().update_config('Paths', f'{str(plugin.suffix)}_path', str(plugin.basepath))
@@ -141,7 +143,7 @@ class UiTraceImportWidget(PageNavigation):
         trace_suffix = os.path.splitext(self.trace)[-1].strip(".")
         for plugin_name, plugin in self.plugins.items():
             if trace_suffix == getattr(plugin, 'suffix', None):
-                print(f"[ INFO ] Selected plugin: {plugin_name} which is compatible with the imported trace")
+                logger.debug(f"Selected plugin: {plugin_name} which is compatible with the imported trace")
                 self.target_plugin = plugin
                 self.target_plugin_name = plugin_name
                 break

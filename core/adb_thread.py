@@ -1,5 +1,8 @@
 import adblib
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QEventLoop
+from core.logger_config import setup_logger
+
+logger = setup_logger("adbThread")
 
 class adbWorker(QObject):
     """
@@ -40,14 +43,14 @@ class AdbThread(QObject):
         if hasattr(self, 'thread') and self.thread is not None:
             try:
                 if self.thread.isRunning():
-                    print("[ INFO ] Waiting for previous adbThread to finish...")
+                    logger.debug("Waiting for previous adbThread to finish...")
                     self.thread.quit()
                     self.thread.wait()
             except RuntimeError:
-                print("[ INFO ] adbThread was already deleted. Skipping wait.")
+                logger.debug("adbThread was already deleted. Skipping wait.")
             self.thread = None
 
-        print("[ INFO ] FileHandler started in background")
+        logger.info("FileHandler started in background")
         self.worker = adbWorker(adb=adb, file=file, path=path, track=track,  action=action)
         self.thread = QThread()
         self.push_event_loop = QEventLoop()
@@ -65,7 +68,7 @@ class AdbThread(QObject):
 
 
     def on_done(self):
-        print("[ INFO ] FileHandler completed")
+        logger.info("FileHandler completed")
         if self.push_event_loop:
             self.push_event_loop.quit()
 

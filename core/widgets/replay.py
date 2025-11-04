@@ -3,12 +3,15 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QMessageBox, QStacke
 
 from core.page_navigation import PageNavigation
 from core.page_navigation import PageIndex
-from adblib import print_codes
 
 import json
 from pathlib import Path
 import time
 import subprocess
+
+from core.logger_config import setup_logger
+
+logger = setup_logger("replay")
 
 class ReplayWorker(QObject):
     finished = Signal(bool)
@@ -40,7 +43,7 @@ class ReplayWorker(QObject):
         self.replay_started.emit(True)
         self.adb.manage_app_permissions(self.process)
         if "gfxreconstruct" in self.process:
-            print("[INFO] Replaying with command: {}".format(
+            logger.debug("Replaying with command: {}".format(
                 " ".join([str(x) for x in self.cmd])))
             subprocess.run(" ".join(self.cmd), shell=True, capture_output=False)
         else:
@@ -48,7 +51,7 @@ class ReplayWorker(QObject):
         time.sleep(0.1)
 
         stdout, _ = self.adb.command([f"ps -A | grep {self.process}"])
-        print("Replay still ongoing.")
+        logger.info("Replay still ongoing.")
         while f'{self.process}' in stdout:
             time.sleep(0.5)
             stdout, _ = self.adb.command([f"ps -A | grep {self.process}"], print_command=False)
@@ -106,18 +109,18 @@ class ReplayWorker(QObject):
             potential_paths = potential_paths.splitlines()
 
             if len(potential_paths) == 0:
-                print(f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] Failed to generate HWC data, no files found matching mask: {hwcpipe_layer_result_mask} ")
+                logger.error(f"Failed to generate HWC data, no files found matching mask: {hwcpipe_layer_result_mask} ")
             else:
                 self.results['hwc_path'] = potential_paths[0]
             if len(potential_paths) > 1:
-                print(
-                    "[ INFO ] More than one result file found from HWC data generation, picked the biggest one: " +
+                logger.debug(
+                    "More than one result file found from HWC data generation, picked the biggest one: " +
                     potential_paths[0])
         self.result_ready.emit(self.results)
 
     def __check_screenshots_on_device(self, base_dir, grep_string, cleanup=False):
         if cleanup:
-            print(f"[ {print_codes.SUCCESS}INFO{print_codes.END_CODE} ] Cleaning up screenshot directory")
+            logger.debug(f"Cleaning up screenshot directory")
             self.adb.command(["rm", "-rf", base_dir])
             return
         paths, _ = self.adb.command(
@@ -236,11 +239,11 @@ class UiReplayWidget(PageNavigation):
         if hasattr(self, 'adbThread') and self.adbThread is not None:
             try:
                 if self.adbThread.isRunning():
-                    print("[ INFO ] Waiting for previous adbThread to finish...")
+                    logger.debug("Waiting for previous adbThread to finish...")
                     self.adbThread.quit()
                     self.adbThread.wait()
             except RuntimeError:
-                print("[ INFO ] adbThread was already deleted. Skipping wait.")
+                logger.debug("adbThread was already deleted. Skipping wait.")
             self.adbThread = None
 
         self.adbThread = QThread()
@@ -282,7 +285,7 @@ class UiReplayWidget(PageNavigation):
                 with open('tmp/replay_args.json', 'w') as outfile:
                     json.dump(data, outfile, indent=2)
                 self.adb.push('tmp/replay_args.json', '/sdcard/devlib-target/')
-            print("[ INFO ] Currently replaying the thread.")
+            logger.debug("Currently replaying the thread.")
             QApplication.processEvents()
 
             self.adbWorker = ReplayWorker(self.adb, self.currentTool.replayer["name"], self.cmd, trace_used, screenshots, hwc, local_dir)
@@ -310,7 +313,7 @@ class UiReplayWidget(PageNavigation):
             return self._replay_results
 
     def check_replay_errors(self):
-        print("[ INFO ] Checking for errors during replay")
+        logger.info("Checking for errors during replay")
         #TODO: check this before pulling screenshots. Risk of reporting error about retracer not being found in logcat
         err_lines = self.currentTool.parse_logcat(mode="replay")
         if len(err_lines):

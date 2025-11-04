@@ -10,6 +10,10 @@ from core.page_navigation import PageNavigation, PageIndex
 from core.adb_thread import AdbThread
 from adblib import print_codes
 
+from core.logger_config import setup_logger
+
+logger = setup_logger("trace")
+
 PAGE_APP_SELECTION = 0
 PAGE_ANALYSING_APK = 1
 PAGE_TOOLS_SELECTION = 2
@@ -29,7 +33,7 @@ class WorkerAdbProcess(QObject):
         self.currentTrace = trace
 
     def run_analyse_apk(self):
-        print(f"[ INFO ] Analysing Engine and API for '{self.proc_name}'")
+        logger.debug(f"Analysing Engine and API for '{self.proc_name}'")
         pkg_name, uses_vulkan, uses_gles, engine = self.adb.analyze_package(self.proc_name)
 
         self.result_ready.emit((pkg_name, uses_vulkan, uses_gles, engine))
@@ -37,11 +41,11 @@ class WorkerAdbProcess(QObject):
 
     def run_app_start_poll(self):
         # Poll for the process on the device
-        print(f"[ INFO ] Checking that app '{self.proc_name}' has started")
+        logger.debug(f"Checking that app '{self.proc_name}' has started")
         while self._running:
             stdout = self.adb.command(["pidof", self.proc_name], run_with_sudo=True, print_command=False)[0]
             if stdout:
-                print(f"[ INFO ] App started '{self.proc_name}' has started")
+                logger.info(f"App started '{self.proc_name}' has started")
                 self.finished.emit(True)
                 return
             time.sleep(0.5)
@@ -336,7 +340,7 @@ class UiTraceWidget(PageNavigation):
             self.plugins[self.currentTool].adb = self.adb
             # Set up device and start prosess
             self.plugins[self.currentTool].trace_setup_device(self.currentApp)
-            print(f"[ INFO ] Device was set up for tracing '{self.currentApp}' using '{self.currentTool}")
+            logger.debug(f"Device was set up for tracing '{self.currentApp}' using '{self.currentTool}")
 
             # Page #1: App start / tracing
             self.app_start_widget = QWidget()
@@ -441,16 +445,16 @@ class UiTraceWidget(PageNavigation):
             self.currentTrace = remote_path_to_trace
             _, ls_error = self.adb.command(['ls', remote_path_to_trace], run_with_sudo=False)
             if ls_error:
-                print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] No output trace file found at: {remote_path_to_trace}. Tracing probably failed.")
+                logger.warning(f"No output trace file found at: {remote_path_to_trace}. Tracing probably failed.")
                 self._handleFailed()
                 return
             else:
-                print(f"[ INFO ] Created trace file at: {remote_path_to_trace}")
+                logger.info(f"Created trace file at: {remote_path_to_trace}")
                 app_end_label = QLabel(f"Trace file created at: {self.currentTrace}")
                 downloading_label = QLabel("")
                 downloading_label.setObjectName("downloading")
 
-            print(f"[ INFO ] Reset device after tracing with '{self.currentTool}'")
+            logger.debug(f"Reset device after tracing with '{self.currentTool}'")
             self.plugins[self.currentTool].trace_reset_device()
 
             app_end_label.setAlignment(Qt.AlignCenter)
@@ -505,9 +509,9 @@ class UiTraceWidget(PageNavigation):
         """
         Report error to user and returns to the app selection page
         """
-        print(f"[ INFO ] Reset device after tracing with '{self.currentTool}'")
+        logger.info(f"Reset device after tracing with '{self.currentTool}'")
         self.plugins[self.currentTool].trace_reset_device()
-        print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] Generation of trace file was not successful, failed to start tracing process.")
+        logger.warning(f"Generation of trace file was not successful, failed to start tracing process.")
         box_lines = ["WARNING: Tracing was not successful. Try a different tracing tool"]
 
         # Check for some basic errors
@@ -538,7 +542,7 @@ class UiTraceWidget(PageNavigation):
         if self.tool_layout.count() >= 4:
             return
         apis_text = ", ".join(apis) if apis else "Unknown"
-        print(f"[ INFO ] Detected Engine: {engine or 'Unknown'}\nUsed APIs: {apis_text}")
+        logger.info(f"Detected Engine: {engine or 'Unknown'}\nUsed APIs: {apis_text}")
         self.trace_info_label.setText(
             f"Detected Engine: {engine or 'Unknown'}\nUsed APIs: {apis_text}\n\n Select Appropriate trace tool. \n Try gfxreconstruct first if available"
         )

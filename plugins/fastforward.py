@@ -4,10 +4,10 @@ import subprocess
 import csv
 from pathlib import Path
 
-from adblib import print_codes
-
 from core.config import ConfigSettings
+from core.logger_config import setup_logger
 
+logger = setup_logger("fastforward_plugin")
 ##########################################################################
 #
 # Tracetool plugin for fastforwarding
@@ -55,7 +55,7 @@ class tracetool(object):
             filename = f"{trace_base}/{ff_name}.gfxr"
             if len(filename) > 91:
                 ff_name = "ff"
-                print("[ INFO ] Capture file name too long. Removing trace name from filename.")
+                logger.debug("Capture file name too long. Removing trace name from filename.")
                 filename = f"{trace_base}/{ff_name}.gfxr"
             # Needs to be less than 92 characters
             self.adb.setprop('debug.gfxrecon.capture_file', filename)
@@ -91,7 +91,7 @@ class tracetool(object):
 
         # Replay
         cmdstr = (" ").join([str(x) for x in cmd])
-        print(f"[ INFO ] Running replay command: {cmdstr}")
+        logger.debug(f"Running replay command: {cmdstr}")
         return cmd, output_file
 
     def generateHWC(self, ff_trace, source_trace, currentTool, from_frame, replayer=None, prev_results=None, extra_args=None):
@@ -121,7 +121,7 @@ class tracetool(object):
             extra_args.extend(['--ez', 'finishBeforeSwap', 'true'])
             measurement_range_args = ['--ei', 'frame_start', '1', '--ei', 'frame_end', '10']
 
-        print(f"[ INFO ] Replaying FF trace to get HWC: {ff_trace}")
+        logger.info(f"Replaying FF trace to get HWC: {ff_trace}")
         results_ff_all = []
         for i in range(3):
             results_ff_hwc = replayer.replay(trace=ff_trace, screenshots=False, hwc=True, repeat=1, extra_args=measurement_range_args + extra_args)
@@ -136,15 +136,15 @@ class tracetool(object):
         source_hwc_path_local = f"{self.config.get_config()['Paths']['hwc_path']}/source_hwc"
         source_hwc_path = results_source_hwc.get('hwc_path', '')
         if not prev_results:
-            print(f"[ INFO ] Replaying Source trace to get HWC: {ff_trace}")
+            logger.info(f"Replaying Source trace to get HWC: {ff_trace}")
             results_source_hwc = replayer.replay(trace=source_trace, screenshots=False, hwc=True, repeat=1, extra_args=extra_args)
             source_hwc_path = results_source_hwc.get('hwc_path', '')
             self.adb.pull(source_hwc_path, source_hwc_path_local)
 
         source_hwc_path_local = f"{source_hwc_path_local}/{source_hwc_path.split('/')[-1]}"
-        print(f"[ INFO ] Starting HWC comparison")
+        logger.info(f"Starting HWC comparison")
         hwc_diffs = self.compare_hwc(ff_hwc_minimum, source_hwc_path_local, offset=from_frame)
-        print(f"[ INFO ] HWC comparison done")
+        logger.info(f"HWC comparison done")
 
         results['ff_trace'] = Path(ff_trace)
         results['ff_hwc_diffs'] = hwc_diffs
@@ -210,7 +210,7 @@ class tracetool(object):
             for ff_row in ff_hwc:
                 source_row = next(source_hwc, None)
                 if source_row is None:
-                    print("[ WARNING ] Source HWC file unexpectedly ran out of rows early.")
+                    logger.warning("Source HWC file unexpectedly ran out of rows early.")
                     break
 
                 for col in ff_hwc.fieldnames:
@@ -221,7 +221,7 @@ class tracetool(object):
                         continue
                     v1, v2 = ff_row[col], source_row[col]
                     if not v1 or not v2:
-                        print(f"[ WARNING ] Missing value when comparing ff frame {row_num-offset} with source frame {row_num-1}, column '{col}': {v1}  {v2}")
+                        logger.warning(f"Missing value when comparing ff frame {row_num-offset} with source frame {row_num-1}, column '{col}': {v1}  {v2}")
                         continue
                     diff_value = float(v2) - float(v1)
                     if float(v2) != 0:
@@ -235,8 +235,8 @@ class tracetool(object):
                     change_percentage = change_ratio * 100.0
                     if not change_percentage >= metrics[col][0] and change_percentage <= metrics[col][1]:
                         # Frame numbers are 0-indexed
-                        print(f"[ WARNING ] Diff above {metrics[col][1]}% or below {metrics[col][0]}% when comparing ff frame {row_num-offset} with source frame {row_num-1}, column '{col}': {v1}  {v2}")
-                        print(f"[ INFO ] DIFF: {diff_value}\n DIFF RATIO: {change_ratio}\n DIFF PERCENTAGE: {change_percentage}")
+                        logger.warning(f"Diff above {metrics[col][1]}% or below {metrics[col][0]}% when comparing ff frame {row_num-offset} with source frame {row_num-1}, column '{col}': {v1}  {v2}")
+                        logger.debug(f"DIFF: {diff_value}\n DIFF RATIO: {change_ratio}\n DIFF PERCENTAGE: {change_percentage}")
                         frame_diffs = {'source_frame': row_num, 'ff_frame': row_num - offset,
                                        'metric': col, 'source_value': v2, 'ff_value': v1,
                                        'diff_value': diff_value, 'diff_ratio': change_ratio, 'diff_percentage': change_percentage,
@@ -279,5 +279,5 @@ class tracetool(object):
                 min_row = [min(float(c1), float(c2), float(c3)) for c1, c2, c3 in zip(row1, row2, row3)]
                 writer.writerow(min_row)
 
-        print(f"Minimum values saved to {output}")
+        logger.info(f"Minimum values saved to {output}")
         return output

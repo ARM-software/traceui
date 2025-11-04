@@ -6,6 +6,7 @@ import os
 import zipfile
 import tempfile
 import shutil
+from core.logger_config import setup_logger
 
 ADB = "adb"
 
@@ -21,6 +22,7 @@ ENGINES = {
     "Mono/Xamarin": [b"mono", b"xamarin"],
 }
 
+logger = setup_logger("adblib")
 
 class print_codes:
     SUCCESS = '\033[92m'
@@ -57,7 +59,7 @@ class adb(object):
         stdout, _ = self.command(['ls', target_file], True, errors_handled_externally=True)
         if stdout:
             if str(target_file) in stdout.splitlines():
-                print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] File with path: {target_file} already exists. Deleting.")
+                logger.warning(f"File with path: {target_file} already exists. Deleting.")
                 self.command(['rm', '-f', target_file], True)
 
     def get_pkg_path(self, pkg):
@@ -106,7 +108,7 @@ class adb(object):
                         break
 
         except Exception as e:
-            print(f"[!] Failed to read {so_path}: {e}")
+            logger.error(f"[!] Failed to read {so_path}: {e}")
 
         return uses_vulkan, uses_gles, engine
 
@@ -157,19 +159,18 @@ class adb(object):
         cmd = [str(x) for x in cmd]
 
         if print_command:
-            print("[ INFO ] Running ADB command: " + " ".join(cmd))
+            logger.debug("Running ADB command: " + " ".join(cmd))
         process = subprocess.run(cmd, capture_output=True, text=True)
         stdout = process.stdout.strip()
         stderr = process.stderr.strip()
         if stderr:
             cmd_str = " ".join(cmd)
             if not errors_handled_externally:
-                emark = f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ]"
+                logger.error(f"Command {cmd_str} failed on device {device}, got error: {stderr}")
+
             else:
-                emark = f"[ INFO ] Error detected but marked as ok. "
-
-            print(f"{emark} Command {cmd_str} failed on device {device}, got error: {stderr}")
-
+                emark = f"Error detected but marked as ok. "
+                logger.info(f"{emark} Command {cmd_str} failed on device {device}, got error: {stderr}")
         return stdout, stderr
 
     def fetch_logcat(self, device=None, filters=None):
@@ -181,7 +182,7 @@ class adb(object):
         stdout = process.stdout.strip()
         stderr = process.stderr.strip()
         if stderr:
-            print(f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] Failed to fetch logcat from device {device}, got error: {stderr}")
+            logger.error(f"Failed to fetch logcat from device {device}, got error: {stderr}")
 
         return stdout.strip()
 
@@ -212,30 +213,30 @@ class adb(object):
             if m.group(2) == 'unauthorized' and only_unath is None:
                 only_unath = True
         if only_unath is True:
-            print(f'[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] You need to enable USB debug on your Android device or click to permit the connection!')
+            logger.warning(f'You need to enable USB debug on your Android device or click to permit the connection!')
             return False
         if len(self.devices) == 0:
-            print(f'[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] No devices found!')
+            logger.error(f'No devices found!')
             return False
         for d in self.devices:
             config = {}
             config["working_sudo_command"] = ""
 
             su_errs = []
-            print("[ INFO ] Sanity checking sudo command, selecting best candidate")
+            logger.debug("Sanity checking sudo command, selecting best candidate")
             for sudo_command in self.POTENTIAL_SUDO_COMMANDS:
                 _, suerr = self.command([sudo_command, 'whoami'], False, d, True)
                 if not suerr:
-                    print(f"[ {print_codes.SUCCESS}SUCCESS{print_codes.END_CODE} ] Found working sudo command {sudo_command}")
+                    logger.debug(f"Found working sudo command {sudo_command}")
                     config["working_sudo_command"] = sudo_command
                     break
                 else:
-                    print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] Sudo command {sudo_command} returned error {suerr}, trying alternatives.")
+                    logger.warning(f"Sudo command {sudo_command} returned error {suerr}, trying alternatives.")
                     su_errs.append(suerr)
 
             if config["working_sudo_command"] is None:
                 err_string = ", ".join(su_errs)
-                print(f"[ {print_codes.ERROR}ERROR{print_codes.END_CODE} ] Unable to find a working sudo command for device, tried: {err_string}")
+                logger.error(f"Unable to find a working sudo command for device, tried: {err_string}")
 
             config['model'] = self.getprop('ro.product.model', d)
             config['abi'] = self.getprop('ro.vendor.product.cpu.abilist', d)
@@ -253,7 +254,7 @@ class adb(object):
                 config['android'] = config['android'] = self.getprop('ro.build.version.release', d)
 
                 if not config['android']:
-                    print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] Failed to fetch android version from device properties. Force setting to 13. This should be fixed.")
+                    logger.warning(f"Failed to fetch android version from device properties. Force setting to 13. This should be fixed.")
 
             self.configs[d] = config
         if len(self.devices) == 1:
@@ -297,7 +298,7 @@ class adb(object):
             del self.restore_props[n]
         if not keepfiles:
             for f in self.added_files:
-                print(f"[ INFO ] Cleaning up file: {f} on device")
+                logger.debug(f"Cleaning up file: {f} on device")
                 self.command(['rm', f], True, device)
             self.added_files = []
 
@@ -312,10 +313,10 @@ class adb(object):
         """Pushes a file to the device"""
         device = self.__check_device(device)
         basename = os.path.basename(file)
-        print(f"[ INFO ] Pushing file from local path {file} to /sdcard/")
+        logger.info(f"Pushing file from local path {file} to /sdcard/")
         subprocess.run(['adb', '-s', device, 'push', file, '/sdcard/'], capture_output=True, text=True)  # copy to sdcard first
         self.command(['mkdir', '-p', path], True, device)  # make sure destination exists
-        print(f"[ INFO ] Moving file from device path /sdcard/ to device path {path}")
+        logger.debug(f"Moving file from device path /sdcard/ to device path {path}")
         self.command(['mv', '/sdcard/%s' % basename, path], True, device)
         file_path = str(path) + '/' + str(basename)
 
@@ -328,7 +329,7 @@ class adb(object):
         """Pulls a file from the device (adb pull)"""
         device = self.__check_device(device)
         subprocess.run(['mkdir', '-p', path], capture_output=True, text=True).stdout.strip()
-        print(f"[ INFO ] Pulling file from device path {file} to local path {path}")
+        logger.debug(f"Pulling file from device path {file} to local path {path}")
         return subprocess.run(['adb', '-s', device, 'pull', file, path], capture_output=True, text=True).stdout.strip()
 
     def apps(self, all=False, device=None):
@@ -372,8 +373,15 @@ class adb(object):
         """Checks that a device is connected"""
         if not device:
             device = self.device
-        assert device, 'No device selected'
-        assert device in self.devices, 'Device not found!'
+
+        if not device:
+            logger.error("No device selected")
+            raise ValueError("No device selected")
+
+        if device not in self.devices:
+            logger.error(f"Device '{device}' not found in connected devices!")
+            raise ValueError("Device not found!")
+
         return device
 
     def cleanUpSDCard(self):

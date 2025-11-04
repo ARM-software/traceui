@@ -1,4 +1,9 @@
 from PySide6.QtWidgets import QLabel, QLineEdit, QPushButton, QVBoxLayout, QMessageBox, QDialog
+from core.logger_config import setup_logger
+import logging
+
+logger = setup_logger("replay_settings")
+
 
 class UiReplaySettings(QDialog):
     def __init__(self):
@@ -41,7 +46,7 @@ class UiReplaySettings(QDialog):
             err.setText(f"Must be an integer. {written_interval} is not valid.")
             err.exec()
             return
-        print(f"[ INFO ] The screenshotting interval was set to {self.interval}")
+        logger.info(f"The screenshotting interval was set to {self.interval}")
         self.accept()
 
     def getInterval(self):

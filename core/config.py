@@ -3,7 +3,9 @@ import configparser
 from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QLineEdit, QFormLayout, QPushButton, QFileDialog
+from core.logger_config import setup_logger
 
+logger = setup_logger("config")
 
 class ConfigSettings():
     def __init__(self):
@@ -19,9 +21,9 @@ class ConfigSettings():
             if self.config_path.exists():
                 old_config_path = Path('./old_config.ini')
                 self.config_path.rename(old_config_path)
-                print(f"[ INFO ] Cannot parse {self.config_path}\nOld config file moved to {old_config_path}\nRecreating config file...")
+                logger.debug(f"Cannot parse {self.config_path}\nOld config file moved to {old_config_path}\nRecreating config file...")
             else:
-                print(f"[ INFO ] {self.config_path} not found. Creating config file...")
+                logger.debug(f"{self.config_path} not found. Creating config file...")
             self.create_config()
             self.config_data = self.load_config()
 

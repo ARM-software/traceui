@@ -9,6 +9,9 @@ from core.config import ConfigSettings
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QEventLoop
 from PySide6.QtWidgets import QLabel, QWidget, QVBoxLayout, QPushButton, QStackedWidget, QScrollArea, QHBoxLayout
 from PySide6.QtGui import QPixmap
+from core.logger_config import setup_logger
+
+logger = setup_logger("fastforward_page")
 
 class FastForwardWorker(QObject):
     """
@@ -46,7 +49,7 @@ class FastForwardWorker(QObject):
         image_diffs_detected = {}
         for num in self.start_frames:
             if not num:
-                print("[ ERROR ] Frame invalid. Skipping... ")
+                logger.error("Frame invalid. Skipping... ")
             image_diffs_detected[num] = []
             cmd_compare = ["compare", "-alpha", "off", "-metric", "RMSE"]
             source_frame_index = num
@@ -75,7 +78,7 @@ class FastForwardWorker(QObject):
                 stdout = process.stdout.decode().strip()
                 stderr = process.stderr.decode().strip()
                 if "compare: not found" in stderr:
-                    print("[ ERROR ] ImageMagick not installed. Please see README")
+                    logger.error("ImageMagick not installed. Please see README")
                     self.not_installed.emit(True)
                     self.finished.emit(True)
                     break
@@ -86,9 +89,9 @@ class FastForwardWorker(QObject):
                 source_frame_index += 1
         for num in self.start_frames:
             if len(image_diffs_detected[num]):
-                print(f"[ INFO ] Image diff detected in fast forward trace {num}:")
+                logger.info(f"Image diff detected in fast forward trace {num}:")
                 for i in range(len(image_diffs_detected[num])):
-                    print(f"\t{image_diffs_detected[num][i][0]} when comparing {image_diffs_detected[num][i][1]} to {image_diffs_detected[num][i][2]}")
+                    logger.info(f"\t{image_diffs_detected[num][i][0]} when comparing {image_diffs_detected[num][i][1]} to {image_diffs_detected[num][i][2]}")
         self.image_diffs_result.emit(image_diffs_detected)
         self.finished.emit(True)
 
@@ -282,7 +285,7 @@ class UiFastForwardWidget(PageNavigation):
         # This will cause ALOT of replays, which is not ideal....
         for i in range(len(self.frames)):
             if not self.frames[i]:
-                print(f"[ ERROR ] Frame not valid. Skipping...")
+                logger.error(f"Frame not valid. Skipping...")
                 continue
 
             self.waiting_label.setText(f"Generating fast forward trace from trace number {self.frames[i]} ({i +1}/{len(self.frames)})")
@@ -340,7 +343,7 @@ class UiFastForwardWidget(PageNavigation):
         self.verify_thread.start()
         self._verify_event_loop.exec()
         self.nestedStack.setCurrentIndex(self.PAGE_POSTFASTFORWARD)
-        print("[ INFO ] Comparison is completed")
+        logger.info("Comparison is completed")
         self.displayComparisonResult()
 
     def _cleanup_scroll(self):

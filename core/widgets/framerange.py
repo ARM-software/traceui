@@ -6,6 +6,10 @@ from PySide6.QtGui import QPixmap, QPainter, QPen, QColor
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QLineEdit, QPushButton, QFormLayout, QScrollArea, QAbstractButton, QMessageBox
 from core.page_navigation import PageNavigation, PageIndex
 from core.adb_thread import AdbThread
+import subprocess
+from core.logger_config import setup_logger
+
+logger = setup_logger("framerange")
 
 class PixMapHelper(QObject):
     results = Signal(object)
@@ -28,7 +32,7 @@ class PixMapHelper(QObject):
         for img in self.images:
             pixmap = QPixmap(img)
             if pixmap.isNull():
-                print(f"[ INFO ] Unable to load image: {img}")
+                logger.info(f"Unable to load image: {img}")
                 continue
             list_imgs.append(pixmap)
         self.results.emit(list_imgs)
@@ -110,17 +114,17 @@ class UiFrameRangeWidget(PageNavigation):
         """
         config = ConfigSettings().get_config()
         search_path = config.get('Paths').get('img_path')
-        print(f"[ INFO ] Looking for images in: {search_path}")
+        logger.info(f"Looking for images in: {search_path}")
         self.img_path = Path(search_path)
         self.images = list(self.img_path.glob('**/*.png'))
         if not self.images:
-            print(f"[ INFO ] Found no images with mask: '**/*.png', trying again with **/*.bmp")
+            logger.debug(f"Found no images with mask: '**/*.png', trying again with **/*.bmp")
             self.images = list(self.img_path.glob('**/*.bmp'))
 
             if not self.images:
-                print(f"[ INFO ] Found no images in {search_path}")
+                logger.debug(f"Found no images in {search_path}")
             else:
-                print(f"[ INFO ] Found {len(self.images)} images in {search_path}!")
+                logger.info(f"Found {len(self.images)} images in {search_path}!")
 
         self.image_indices = []
         for image_path in self.images:
@@ -131,13 +135,13 @@ class UiFrameRangeWidget(PageNavigation):
                 self.image_indices.append(int(frame))
             except ValueError:
                 self.image_indices.append(-1)
-                print(f"[ ERROR ] Invalid snapshot image name format for image: {image_path}")
+                logger.error(f"Invalid snapshot image name format for image: {image_path}")
 
         zip_sorted = sorted(zip(self.images, self.image_indices), key=lambda x: x[1])
         self.images = [x[0] for x in zip_sorted]
         self.image_indices = [x[1] for x in zip_sorted]
 
-        print("[ INFO ] Loading images...")
+        logger.info("Loading images...")
         QApplication.processEvents()
         self.updatePictureWidgets()
         self.setupLayouts()
@@ -264,7 +268,7 @@ class UiFrameRangeWidget(PageNavigation):
 
     def thread_completed(self, results):
         self.pixmaps = results
-        print("[ INFO ] Image loading completed!")
+        logger.info("Image loading completed!")
         if self.eventloop:
             self.eventloop.quit()
 
@@ -328,29 +332,29 @@ class UiFrameRangeWidget(PageNavigation):
 
     def validate_framerange(self):
         """
-        Check validity of framerange. Print error message if not valid
+        Check validity of framerange. Logs error message if not valid
 
         Return:
             bool: False if not valid range, true if valid range
         """
         if self.current_range_start > self.current_range_end:
-            print(f"[ ERROR ] Selected range start frame is greater than end frame: [{self.current_range_start}-{self.current_range_end})")
+            logger.error(f"Selected range start frame is greater than end frame: [{self.current_range_start}-{self.current_range_end})")
             return False
 
         elif (self.current_range_end == 0 and self.current_range_start == 0):
-            print(f"[ ERROR ] No frames selected.")
+            logger.error(f"No frames selected.")
             return False
 
         elif self.current_range_start == self.current_range_end:
-            print(f"[ ERROR ] Selected range start frame is the same as end frame: [{self.current_range_start}-{self.current_range_end})")
+            logger.error(f"Selected range start frame is the same as end frame: [{self.current_range_start}-{self.current_range_end})")
             return False
 
         elif self.current_range_start == -1:
-            print(f"[ ERROR ] Selected range start frame is invalid: [{self.current_range_start}-{self.current_range_end})")
+            logger.error(f"Selected range start frame is invalid: [{self.current_range_start}-{self.current_range_end})")
             return False
 
         elif self.current_range_end == -1:
-            print(f"[ ERROR ] Selected range end frame is invalid: [{self.current_range_start}-{self.current_range_end})")
+            logger.error(f"Selected range end frame is invalid: [{self.current_range_start}-{self.current_range_end})")
             return False
 
         return True
@@ -367,7 +371,7 @@ class UiFrameRangeWidget(PageNavigation):
                     start_range = int(tokens[0])
                     end_range = int(tokens[1])
                 except ValueError:
-                    print("[ ERROR ] The textual framerange input is invalid, must have format: [<int>-<int>). Ignoring.")
+                    logger.error("The textual framerange input is invalid, must have format: [<int>-<int>). Ignoring.")
                     return
 
                 self.current_range_start = start_range
@@ -382,14 +386,14 @@ class UiFrameRangeWidget(PageNavigation):
         self.processLineFramerange()
 
         if not self.validate_framerange():
-            print(f"[ WARNING ] Chosen frame range invalid")
+            logger.warning(f"Chosen frame range invalid")
             msg = QMessageBox()
             msg_text = " Please select a valid frame range."
             msg.setText(msg_text)
             msg.exec()
             self.next_signal.emit(PageIndex.FRAMERANGE)
             return False
-        print(f"[ INFO ] Frame range set to: [{self.current_range_start}-{self.current_range_end})")
+        logger.info(f"Frame range set to: [{self.current_range_start}-{self.current_range_end})")
         self.gotoframeselection_signal.emit()
         self.next_signal.emit(PageIndex.FRAME_SELECTION)
 

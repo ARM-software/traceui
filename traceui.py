@@ -4,11 +4,19 @@ import signal
 import sys
 import os
 import adblib
-
 from PySide6.QtWidgets import QApplication
+from core.logger_config import setup_logger
+import logging
 from gui import MainWindow
 
 plugins_path = "plugins"
+logging.basicConfig(
+    filename='traceui.log',
+    filemode='w',  # overwrite the log file each time
+    level=logging.DEBUG,
+    format='%(levelname)s | %(name)s | %(message)s'
+)
+logger = setup_logger("traceui.py")
 
 if __name__ == "__main__":
     # Initialize adblib
@@ -25,7 +33,7 @@ if __name__ == "__main__":
         plugin = mod.tracetool(adb)
         plugin_name = plugin.plugin_name
         plugins[plugin_name] = plugin
-        print("Loaded plugin: plugins/%s -- %s" % (f, plugins[fname].full_name))
+        logger.debug("Loaded plugin: plugins/%s -- %s" % (f, plugins[fname].full_name))
     sys.path.pop(0)
 
     # Starts and runs the app

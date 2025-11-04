@@ -5,7 +5,10 @@ from pathlib import Path
 
 import adblib
 from adblib import print_codes
+from core.logger_config import setup_logger
 
+
+logger = setup_logger("patrace")
 
 class tracetool(object):
     def __init__(self, adb):
@@ -64,12 +67,12 @@ class tracetool(object):
             layer_path = os.getcwd() / self.basepath / self.dirname / adb_config_abi.split(',')[0]
         # Ensure layer exists in local path
         if not layer_path.exists():
-            print(f"[ ERROR ] Trace layer not found on local device")
+            logger.critical(f"Trace layer not found on local device")
             raise Exception(f"Layer not found in {layer_path}")
 
         # Put the layer on device
         self.adb.command(['mkdir', '-p', self.device_layer_root], True)
-        print(f"[ INFO ] Pushing layer: {layer_path} to {self.device_layer_root}")
+        logger.debug(f"Pushing layer: {layer_path} to {self.device_layer_root}")
         self.adb.push(str(layer_path), str(self.device_layer_root))
         if not self.adb.command(['ls', self.device_layer_root], True):
             raise Exception(f"Layer not found in {self.device_layer_root}")
@@ -118,7 +121,7 @@ class tracetool(object):
             layers_enabled == '1' and
             app_in_debug_prop == app and
                 self.layer_filename in tracing_layers_enabled):
-            print(f"[ INFO ] Attempted tracing for:  '{app}'")
+            logger.debug(f"Attempted tracing for:  '{app}'")
             return True
 
         return False
@@ -137,9 +140,9 @@ class tracetool(object):
         stdout, _ = self.adb.command([f"ps -A | grep {app}"])
         if app in stdout:
             self.adb.command([f'am force-stop {app}'], True)
-            print(f"[ INFO ] Stopped '{app}'")
+            logger.debug(f"Stopped '{app}'")
         else:
-            print(f"[ INFO ] App ({app}) is not running")
+            logger.debug(f"App ({app}) is not running")
 
         self.adb.command(['chmod', 'o+rw', self.capture_file_fullpath], True)
         return self.capture_file_fullpath
@@ -170,7 +173,7 @@ class tracetool(object):
             # Delete existing hwc data as this can lead to dangerous mixups on replay failure
             # TODO: Remove this when we properly detect success/failure on
             # replay
-            print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] Removing any old HWCPipe results to avoid mixups. We should stop doing this when replay plugins detect failures in a robust manner.")
+            logger.warning(f"Removing any old HWCPipe results to avoid mixups. We should stop doing this when replay plugins detect failures in a robust manner.")
             self.adb.command(
                 ['rm', hwcpipe_layer_result_mask],
                 True, None, True)
@@ -231,19 +234,19 @@ class tracetool(object):
 
             # Check for potential permission or filesystem issues
             if "Warning:" in line:
-                print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] {line}")
+                logger.warning(f"{line}")
                 err_lines.append(line)
 
             if "Never rendered anything" in line:
-                print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] Unusable tracefile: {line}")
+                logger.warning(f"Unusable tracefile: {line}")
                 err_lines.append(line)
 
             if "Failed to open" in line and "output JSON" not in line:
-                print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] File not accessible : {line}")
+                logger.warning(f"File not accessible : {line}")
                 err_lines.append(line)
 
         if not found_app:
-            print(f"[ {print_codes.WARNING}WARNING{print_codes.END_CODE} ] Found no mention of the target app: {app} in the logcat output, app may not have been started.")
+            logger.warning(f"Found no mention of the target app: {app} in the logcat output, app may not have been started.")
             err_lines.append(f"WARNING: Found no mention of the target app: {app} in the logcat output, app may not have been started.\n")
 
         return err_lines
