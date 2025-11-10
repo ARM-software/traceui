@@ -277,7 +277,6 @@ class UiFastForwardWidget(PageNavigation):
         currentTool = self.replay_widget.currentTool
         original_trace = self.replay_widget.currentTrace
         tool = tracetool(self.replay_widget.adb)
-        extra_args = []
         screenshots_ff = {}
         self.ff_traces = {}
         # This will cause ALOT of replays, which is not ideal....
@@ -294,7 +293,7 @@ class UiFastForwardWidget(PageNavigation):
                 repeat=1,
                 fastforward=True,
                 from_frame=self.frames[i],
-                extra_args=extra_args,
+                extra_args=self.replay_widget.currentTool.extra_args,
             )
             ff_trace = results["fastforward_trace_path"]
             self.ff_traces[self.frames[i]] = ff_trace
@@ -306,7 +305,7 @@ class UiFastForwardWidget(PageNavigation):
                 repeat=1,
                 fastforward=False,
                 to_frame=5,
-                extra_args=[],
+                extra_args=self.replay_widget.currentTool.extra_args,
                 trace = ff_trace,
             )
 
@@ -320,7 +319,7 @@ class UiFastForwardWidget(PageNavigation):
             repeat=1,
             fastforward=False,
             from_frame=frame_list,
-            extra_args=[],
+            extra_args=self.replay_widget.currentTool.extra_args,
             trace = original_trace,
         )
 

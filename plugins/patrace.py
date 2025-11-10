@@ -11,6 +11,7 @@ class tracetool(object):
     def __init__(self, adb):
         self.adb = adb
         self.plugin_name = 'patrace'
+        self.extra_args = []
         self.suffix = 'pat'
         self.full_name = 'Official release of patrace'
         self.variant = 'scratch'

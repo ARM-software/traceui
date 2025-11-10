@@ -118,7 +118,6 @@ class UiTraceImportWidget(PageNavigation):
         self.override_trace_if_existing = self.importWindow.overrideIfExisting()
         self.skip_replay = self.importWindow.skipReplay()
         self.delete_trace_on_shutdown = self.importWindow.deleteTraceOnShutdown()
-        self.remove_unsupported_extensions_on_replay = self.importWindow.removeUnsupportedExtensions()
 
         trace_suffix = self.trace.split("/")[-1].split(".")[-1]
         plugin = None

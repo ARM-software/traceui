@@ -30,13 +30,8 @@ class ImportWindow(QWidget):
         self.override_existing_checkbox = QCheckBox("Override existing trace on device")
         self.skip_replay_checkbox = QCheckBox("Skip replay validation for imported trace")
         self.delete_trace_on_shutdown_checkbox = QCheckBox("Remove imported trace from device during cleanup")
-        self.remove_unsupported_extensions_on_replay = QCheckBox("Remove unsupported extensions")
-        self.delete_trace_on_shutdown_checkbox = QCheckBox("Remove imported trace from device during cleanup")
-        self.remove_unsupported_extensions_on_replay = QCheckBox("Remove unsupported extensions")
-
         self.button = QPushButton("Start")
         self.button.clicked.connect(self.updateTrace)
-
 
     def setUpLayout(self):
         """
@@ -47,8 +42,6 @@ class ImportWindow(QWidget):
         layout2.addWidget(self.override_existing_checkbox)
         layout2.addWidget(self.skip_replay_checkbox)
         layout2.addWidget(self.delete_trace_on_shutdown_checkbox)
-        layout2.addWidget(self.remove_unsupported_extensions_on_replay)
-        self.remove_unsupported_extensions_on_replay.setChecked(True)
 
         label_trace = QLabel("Import trace:")
         layout.addRow(label_trace, self.lineEdit_trace)
@@ -94,12 +87,6 @@ class ImportWindow(QWidget):
         Return bool based in "delete trace on shutdown"-checkbox
         """
         return self.delete_trace_on_shutdown_checkbox.isChecked()
-
-    def removeUnsupportedExtensions(self):
-        """
-        Return bool based on "remove unsupported extension"-checkbox
-        """
-        return self.remove_unsupported_extensions_on_replay.isChecked()
 
     def closeEvent(self, event: QCloseEvent):
         """

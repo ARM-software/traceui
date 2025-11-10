@@ -45,7 +45,6 @@ class MainWindow(QMainWindow):
         self.currentApp = ""
         self.currentTrace = ""
         self.skip_replay = False
-        self.remove_unsupported_extensions_on_replay = True
         self.is_importing = False
 
         self.currentTool = None
@@ -250,7 +249,6 @@ class MainWindow(QMainWindow):
         self.currentTool = self.widget_import.target_plugin_name
         self.currentTrace = Path(self.widget_import.trace)
         self.skip_replay = self.widget_import.skip_replay
-        self.remove_unsupported_extensions_on_replay = self.widget_import.remove_unsupported_extensions_on_replay
         self.is_importing = True
 
         # TODO: Set this properly
@@ -359,7 +357,7 @@ class MainWindow(QMainWindow):
         self.showLoadingScreen()
         self.configureReplayWidget()
         extra_args = []
-        if self.remove_unsupported_extensions_on_replay and self.currentTool == 'gfxreconstruct':
+        if self.currentTool == 'gfxreconstruct':
             extra_args = ["--remove-unsupported"]
         QApplication.processEvents()
         self.replaySettings = UiReplaySettings()

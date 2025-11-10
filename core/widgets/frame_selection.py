@@ -290,10 +290,6 @@ class UiFrameSelectionWidget(PageNavigation):
         Compute the frames and change label to tell user the # of the picked frame(s)
         """
         self.waiting_label.setText("Currently replaying the trace and selecting frames. Please wait...")
-        extra_args = []
-        if self.replay_widget.currentTool.plugin_name == 'gfxreconstruct':
-            extra_args = ["--remove-unsupported"]
-
         results = self.replay_widget.replay(
             screenshots=False,
             hwc=True,
@@ -301,7 +297,7 @@ class UiFrameSelectionWidget(PageNavigation):
             fastforward=False,
             from_frame=self.framerange_start,
             to_frame=self.framerange_end,
-            extra_args=extra_args,
+            extra_args=self.replay_widget.currentTool.extra_args,
         )
         if results == None:
             self.waiting_label.setText("Cannot set up hwc pipe layer on the device. Device may be unrooted")
@@ -434,6 +430,7 @@ class UiFrameSelectionWidget(PageNavigation):
         self.waiting_label.setText("Getting relevant screenshots. Please wait...")
         if not self.frame_num_list:
             return False
+
         results = self.replay_widget.replay(
                 screenshots = "selecting_frames",
                 hwc=False,
@@ -441,7 +438,7 @@ class UiFrameSelectionWidget(PageNavigation):
                 fastforward=False,
                 from_frame=self.frame_num_list,
                 to_frame=max(self.frame_num_list),
-                extra_args=[],
+                extra_args=self.replay_widget.currentTool.extra_args,
         )
         for path in results['screenshot_path']:
             self.replay_widget.adb.pull(path, "tmp")

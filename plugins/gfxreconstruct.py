@@ -22,6 +22,7 @@ class tracetool(object):
         self.adb = adb
         self.config = ConfigSettings()
         self.plugin_name = 'gfxreconstruct'
+        self.extra_args = ['--remove-unsupported']
         self.suffix = 'gfxr'
         self.full_name = 'Official release of gfxreconstruct'
         self.variant = 'internal'
