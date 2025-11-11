@@ -82,6 +82,9 @@ class MainWindow(QMainWindow):
                 self.pages[i].cleanup_page()
 
             self.visited_pages = {i for i in self.visited_pages if i < index}
+            if index == PageIndex.REPLAY:
+                self.pages[PageIndex.FRAMERANGE].cleanup_page()
+                self.move_to_replay_widget_on_import()
         self.visited_pages.add(index)
 
         for i, btn in enumerate(self.step_buttons):
@@ -352,7 +355,7 @@ class MainWindow(QMainWindow):
         if self.skip_replay:
             return
 
-        self.stacked.setCurrentIndex(PageIndex.REPLAY)
+        self.set_page(PageIndex.REPLAY)
         self.showLoadingScreen()
         self.configureReplayWidget()
         extra_args = []
