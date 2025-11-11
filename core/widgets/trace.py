@@ -94,7 +94,7 @@ class UiTraceWidget(PageNavigation):
         self.adb.clear_logcat()
         self.button_list = None
         self.searchbar.clear()
-        if self.start_application_button.isHidden():
+        if hasattr(self, "start_application_button") and self.start_application_button.isHidden():
             self.start_application_button.show()
 
     def appSelectionPage(self):

@@ -74,6 +74,8 @@ class MainWindow(QMainWindow):
             # Always load import window at import page
             if index == PageIndex.TRACE_IMPORTER:
                 self.pages[index].traceImport()
+            elif index == PageIndex.CONNECT:
+                self.pages[index].refresh()
             # clean up all advanced pages
             pages_to_clean = {i for i in self.visited_pages if i > index}
             for i in pages_to_clean:
