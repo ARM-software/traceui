@@ -299,6 +299,7 @@ class adb(object):
             for f in self.added_files:
                 print(f"[ INFO ] Cleaning up file: {f} on device")
                 self.command(['rm', f], True, device)
+            self.added_files = []
 
     def intermittent_cleanup(self, device=None, keepfiles=False):
         """Cleans up the device, resets all props set with the setprop function but does not delete any files"""

@@ -400,6 +400,8 @@ class UiFrameRangeWidget(PageNavigation):
         self.current_focus_image_index = 0
         self.current_range_start = 0
         self.current_range_end = 0
+        self.framerange_frame.setText("Frame: 0")
+        self.framerange_label.setText("Current framerange: 0-0")
         self.framerange_input.clear()
         if self.frame_focus is not None:
             self.frame_focus.clear()
