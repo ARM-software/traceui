@@ -51,7 +51,7 @@ class FastForwardWorker(QObject):
             cmd_compare = ["compare", "-alpha", "off", "-metric", "RMSE"]
             source_frame_index = num
             ff_frame_index = 1
-            if self.currentTool == 'gfxreconstruct':
+            if self.currentTool.plugin_name == 'gfxreconstruct':
                 source_frame_index+=1
                 ff_frame_index+=1
             ff_frame_list = self.result_ff[num].get('screenshot_path', [])

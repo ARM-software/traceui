@@ -316,10 +316,12 @@ class adb(object):
         self.command(['mkdir', '-p', path], True, device)  # make sure destination exists
         print(f"[ INFO ] Moving file from device path /sdcard/ to device path {path}")
         self.command(['mv', '/sdcard/%s' % basename, path], True, device)
-        self.command(['chmod', 'a+r', str(path) + '/' + str(basename)], True, device)
+        file_path = str(path) + '/' + str(basename)
 
-        if track:
-            self.added_files.append(str(path) + '/' + str(basename))
+        self.command(['chmod', 'a+r', file_path], True, device)
+
+        if track and file_path not in self.added_files:
+            self.added_files.append(file_path)
 
     def pull(self, file, path, device=None):
         """Pulls a file from the device (adb pull)"""
