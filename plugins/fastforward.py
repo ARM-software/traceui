@@ -94,7 +94,7 @@ class tracetool(object):
         print(f"[ INFO ] Running replay command: {cmdstr}")
         return cmd, output_file
 
-    def generateHWC(self, ff_trace, source_trace, currentTool, from_frame, replayer=None, prev_results={}, extra_args=[]):
+    def generateHWC(self, ff_trace, source_trace, currentTool, from_frame, replayer=None, prev_results=None, extra_args=None):
         """
         Generate hardware counters.
 
@@ -110,6 +110,8 @@ class tracetool(object):
             list: With paths to result files
 
         """
+        prev_results = prev_results or {}
+        extra_args = list(extra_args) if extra_args else []
         results = {}
 
         if currentTool.plugin_name == 'gfxreconstruct':

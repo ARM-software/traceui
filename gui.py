@@ -109,7 +109,7 @@ class MainWindow(QMainWindow):
         self.widget_loading = self.loadingWidget()
         self.widget_import = UiTraceImportWidget(self.adb, self.trace, self.plugins)
         self.widget_frameselection = UiFrameSelectionWidget()
-        self.widget_fastforward = UiFastForwardWidget()
+        self.widget_fastforward = UiFastForwardWidget(self.plugins)
 
         self.pages_dict = {
             "Connect Device": self.widget_connect,  # index 0

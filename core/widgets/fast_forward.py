@@ -101,13 +101,14 @@ class UiFastForwardWidget(PageNavigation):
     PAGE_POSTFASTFORWARD = 2
     PAGE_POSTHWC = 3
 
-    def __init__(self):
+    def __init__(self, plugins):
         super().__init__()
         self.replay_widget = None
         self.frames = None
         self.framerange_start = None
         self.framerange_end = None
         self.image_diffs = None
+        self.plugins = plugins
 
         self.setUpWidgetsPreFF()
         self.setUpLayoutsPreFF()
@@ -244,12 +245,12 @@ class UiFastForwardWidget(PageNavigation):
         self.nestedStack.setCurrentIndex(self.PAGE_LOADING)
         currentTrace = self.replay_widget.currentTrace
         currentTool = self.replay_widget.currentTool
-        trace = tracetool(self.replay_widget.adb)
         hwc_dict = {}
         prev_result = {}
         for frame in self.frames:
             self.waiting_label.setText(f"Generating HWC for fast forwarding trace starting at frame {frame}")
-            hwc_data = trace.generateHWC(ff_trace=self.ff_traces[frame], from_frame=frame, source_trace=currentTrace, prev_results=prev_result, currentTool=currentTool, replayer=self.replay_widget)
+            extra_args = currentTool.extra_args
+            hwc_data = self.plugins["fastforward"].generateHWC(ff_trace=self.ff_traces[frame], from_frame=frame, source_trace=currentTrace, prev_results=prev_result, currentTool=currentTool, replayer=self.replay_widget, extra_args=extra_args)
             prev_result = hwc_data
             hwc_dict[frame] = hwc_data
         self.setHWCResultLabel(hwc_dict)
@@ -276,7 +277,6 @@ class UiFastForwardWidget(PageNavigation):
         self.nestedStack.setCurrentIndex(self.PAGE_LOADING)
         currentTool = self.replay_widget.currentTool
         original_trace = self.replay_widget.currentTrace
-        tool = tracetool(self.replay_widget.adb)
         screenshots_ff = {}
         self.ff_traces = {}
         # This will cause ALOT of replays, which is not ideal....
