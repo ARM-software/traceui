@@ -94,7 +94,7 @@ class tracetool(object):
         self.adb.command(['settings', 'delete', 'global', 'gpu_debug_layers_gles'])
 
         # Remove all custom settings
-        self.adb.cleanup()
+        self.adb.intermediate_cleanup()
 
     def trace_parse_logcat(self, app):
         return []

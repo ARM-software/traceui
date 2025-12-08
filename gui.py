@@ -259,6 +259,7 @@ class MainWindow(QMainWindow):
         self.adb.clear_logcat()
         self.adb.command(["mkdir", "-p", target_path], True)
         stdout, _ = self.adb.command(['ls', target_path / self.currentTrace.name], run_with_sudo=False, errors_handled_externally=True)
+        self.adb.cleanup()
 
         if stdout:
             trace_exists_on_device = True

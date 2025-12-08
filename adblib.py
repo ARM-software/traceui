@@ -292,17 +292,14 @@ class adb(object):
 
     def cleanup(self, device=None, keepfiles=False):
         """Cleans up the device, resets all props set with the setprop function and deletes all tracked files"""
-        device = self.__check_device(device)
-        for n in list(self.restore_props.keys()):
-            self.command(['setprop', n, self.restore_props[n]], False, device)
-            del self.restore_props[n]
+        self.intermediate_cleanup(device=device)
         if not keepfiles:
             for f in self.added_files:
                 logger.debug(f"Cleaning up file: {f} on device")
                 self.command(['rm', f], True, device)
             self.added_files = []
 
-    def intermittent_cleanup(self, device=None, keepfiles=False):
+    def intermediate_cleanup(self, device=None):
         """Cleans up the device, resets all props set with the setprop function but does not delete any files"""
         device = self.__check_device(device)
         for n in list(self.restore_props.keys()):

@@ -149,7 +149,7 @@ class tracetool(object):
         self.adb.command(['settings', 'delete', 'global', 'gpu_debug_layers'])
 
         # Remove all costom settings
-        self.adb.cleanup()
+        self.adb.intermediate_cleanup()
 
     # TODO
     def trace_parse_logcat(self, app):  # return None when done
