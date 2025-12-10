@@ -21,6 +21,7 @@ class ReplayWorker(QObject):
     move_pictures = Signal(bool)
     pull_pictures = Signal(bool)
     replay_started = Signal(bool)
+    error = Signal(Exception)
 
 
     def __init__(self, adb, process, cmd, filename, screenshot, hwc, local_dir, extra_args={}):
@@ -75,13 +76,20 @@ class ReplayWorker(QObject):
                 self.results['fastforward_trace_path'] = f"{trace_base}/{ff_name}_frames_{self.extra_args['from_frame']}_through_{self.extra_args['to_frame']}.optimized.gfxr"
                 self.adb.push(optimized_trace, trace_base, device=None, track=False)
         # Check if the fastforward tracing actually made a file
-        ff_trace_output, _ = self.adb.command(
-            [f"if [ -f {self.results['fastforward_trace_path']} ]; then echo true; else echo false; fi"])
-        #currentTool.trace_reset_device()
-        if ff_trace_output == 'true':
-            self.result_ready.emit(self.results)
-        else:
-            raise AssertionError('Fastforward trace have NOT been created')
+        try:
+            ff_trace_output, _ = self.adb.command(
+                [f"if [ -f {self.results['fastforward_trace_path']} ]; then echo true; else echo false; fi"])
+            #currentTool.trace_reset_device()
+            if ff_trace_output == 'true':
+                self.result_ready.emit(self.results)
+            else:
+                raise AssertionError('Fastforward trace have NOT been created')
+        except AssertionError as e:
+            self.error.emit(e)
+        finally:
+            self.finished.emit(True)
+
+
 
 
     def postreplay(self):
@@ -164,6 +172,7 @@ class UiReplayWidget(PageNavigation):
         self.adb = adb
         self.plugins = plugins
         self.errorsLastReplay = False
+        self._replay_exception = None
         self.setupLoading()
 
     def setCurrentTool(self, tool):
@@ -184,6 +193,7 @@ class UiReplayWidget(PageNavigation):
         """
         self.replay_label.setText("Please check device for potential information if the program remains stuck on this page.")
         self.errorsLastReplay = False
+        self._replay_exception = None
         pkg = self.currentTool.replayer["name"]
         if hasattr(self, "adbWorker"):
             self.adbWorker.stop()
@@ -266,6 +276,7 @@ class UiReplayWidget(PageNavigation):
 
             self.ff_worker.result_ready.connect(self._handle_result_ready)
             self.ff_worker.result_ready.connect(lambda: self.ff_done.emit())
+            self.ff_worker.error.connect(self._handle_worker_error)
 
             self.ff_worker.finished.connect(self.adbThread.quit)
             self.ff_worker.finished.connect(self.ff_worker.deleteLater)
@@ -327,5 +338,11 @@ class UiReplayWidget(PageNavigation):
 
     def _handle_result_ready(self, results):
         self._replay_results = results
+        if self._replay_event_loop:
+            self._replay_event_loop.quit()
+
+    def _handle_worker_error(self, exception):
+        self._replay_results = None
+        self._replay_exception = exception
         if self._replay_event_loop:
             self._replay_event_loop.quit()

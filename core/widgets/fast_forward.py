@@ -112,6 +112,7 @@ class UiFastForwardWidget(PageNavigation):
         self.framerange_end = None
         self.image_diffs = None
         self.plugins = plugins
+        self.error_msg = ""
 
         self.setUpWidgetsPreFF()
         self.setUpLayoutsPreFF()
@@ -153,12 +154,19 @@ class UiFastForwardWidget(PageNavigation):
         Set up loading page
         """
         self.waiting_label = QLabel("Please wait...")
+        self.waiting_label.setFixedWidth(700)
+        self.waiting_label.setWordWrap(True)
         loading_widget = QWidget()
         self.waiting_label.setAlignment(Qt.AlignCenter)
+        self.retry = QPushButton("Retry")
+        self.retry.clicked.connect(self.performFastForward)
 
         v_layout = QVBoxLayout()
         v_layout.addWidget(self.waiting_label)
+        v_layout.addWidget(self.retry)
+        v_layout.setAlignment(Qt.AlignCenter)
         loading_widget.setLayout(v_layout)
+        self.retry.hide()
 
         self.nestedStack.insertWidget(self.PAGE_LOADING, loading_widget)
 
@@ -277,42 +285,58 @@ class UiFastForwardWidget(PageNavigation):
         Returns:
             ff_trace_list (list): List of path(s) to fastforward trace(s).
         """
+        self.error_msg = ""
+        self.retry.hide()
         self.nestedStack.setCurrentIndex(self.PAGE_LOADING)
         currentTool = self.replay_widget.currentTool
         original_trace = self.replay_widget.currentTrace
         screenshots_ff = {}
         self.ff_traces = {}
+        extra_args = self.replay_widget.currentTool.extra_args
         # This will cause ALOT of replays, which is not ideal....
         for i in range(len(self.frames)):
-            if not self.frames[i]:
-                logger.error(f"Frame not valid. Skipping...")
+            try:
+                if not self.frames[i]:
+                    logger.error(f"Frame not valid. Skipping...")
+                    continue
+
+                self.waiting_label.setText(f"Generating fast forward trace from trace number {self.frames[i]} ({i +1}/{len(self.frames)})")
+                results = self.replay_widget.replay(
+                    screenshots=False,
+                    trace = original_trace,
+                    hwc=False,
+                    repeat=1,
+                    fastforward=True,
+                    from_frame=self.frames[i],
+                    extra_args=extra_args,
+                )
+                replay_error = self.check_errors(operation="Generating fast forward trace", frame_number=self.frames[i])
+                if replay_error:
+                    continue
+                ff_trace = results["fastforward_trace_path"]
+
+                self.ff_traces[self.frames[i]] = ff_trace
+
+                self.waiting_label.setText(f"Getting screenshots of fast fastforward generated from frame number {self.frames[i]} ({i +1}/{len(self.frames)})")
+                result_ff = self.replay_widget.replay(
+                    screenshots="specific_framerange",
+                    hwc=False,
+                    repeat=1,
+                    fastforward=False,
+                    to_frame=5,
+                    extra_args=extra_args,
+                    trace = ff_trace,
+                )
+                replay_error = self.check_errors(operation="Generating screenshots of ff trace", frame_number=self.frames[i])
+                if replay_error:
+                    continue
+                screenshots_ff[self.frames[i]] = result_ff
+            except KeyError:
+                self.error_msg+=f"ERROR! No FF trace generated for frame {self.frames[i]}. Check logs\n\n"
                 continue
-
-            self.waiting_label.setText(f"Generating fast forward trace from trace number {self.frames[i]} ({i +1}/{len(self.frames)})")
-            results = self.replay_widget.replay(
-                screenshots=False,
-                trace = original_trace,
-                hwc=False,
-                repeat=1,
-                fastforward=True,
-                from_frame=self.frames[i],
-                extra_args=self.replay_widget.currentTool.extra_args,
-            )
-            ff_trace = results["fastforward_trace_path"]
-            self.ff_traces[self.frames[i]] = ff_trace
-
-            self.waiting_label.setText(f"Getting screenshots of fast fastforward from trace number {self.frames[i]} ({i +1}/{len(self.frames)})")
-            result_ff = self.replay_widget.replay(
-                screenshots="specific_framerange",
-                hwc=False,
-                repeat=1,
-                fastforward=False,
-                to_frame=5,
-                extra_args=self.replay_widget.currentTool.extra_args,
-                trace = ff_trace,
-            )
-
-            screenshots_ff[self.frames[i]] = result_ff
+            except TypeError:
+                self.error_msg+=f"ERROR! No FF trace generated for frame {self.frames[i]}. Check logs\n\n"
+                continue
 
         frame_list = self._get_frame_list()
         self.waiting_label.setText("Getting screenshots of original trace")
@@ -322,10 +346,14 @@ class UiFastForwardWidget(PageNavigation):
             repeat=1,
             fastforward=False,
             from_frame=frame_list,
-            extra_args=self.replay_widget.currentTool.extra_args,
+            extra_args=extra_args,
             trace = original_trace,
         )
-
+        self.check_errors(operation="Generating screenshots of original trace")
+        if len(self.error_msg):
+            self.waiting_label.setText(self.error_msg)
+            self.retry.show()
+            return
         self._verify_event_loop = QEventLoop()
         self.waiting_label.setText("Comparing screenshots to verify the fast forward trace(s)")
         self.verify_worker = FastForwardWorker(self.replay_widget.adb, screenshots_ff, result_original, self.frames, currentTool)
@@ -376,6 +404,8 @@ class UiFastForwardWidget(PageNavigation):
         self.result_label.clear()
         self.ff_traces = None
         self.waiting_label.setText("Please wait...")
+        self.error_msg = ""
+        self.retry.hide()
         self._cleanup_scroll()
 
     def displayComparisonResult(self):
@@ -422,3 +452,17 @@ class UiFastForwardWidget(PageNavigation):
         self.image_diffs = result
         if self._verify_event_loop:
             self._verify_event_loop.quit()
+
+    def check_errors(self, operation, frame_number=None):
+        err_lines = self.replay_widget.currentTool.parse_logcat(mode="replay")
+        if not err_lines:
+            return False
+
+        header = f"ERROR! During: {operation}"
+        if frame_number is not None:
+            header += f" Frame number: {frame_number}"
+        header += "\n"
+
+        self.error_msg += header + "\n".join(err_lines) + "\n\n"
+
+        return True
