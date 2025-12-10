@@ -1,5 +1,13 @@
 # Trace UI
 
+The Trace UI tool is a python application that is designed to streamline the process of creating and post
+processing API traces from Android by automating as much of the workflow as possible.
+
+Purpose
+* Make tracing on Android faster, easier and more reliable.
+* Streamline and standardize the trace generation process to increase consistency.
+* Offer a reliable way to generate and verify fastforward traces on rootable devices available in the market.
+
 ## Installation
 
 Requires python 3.6 or newer
