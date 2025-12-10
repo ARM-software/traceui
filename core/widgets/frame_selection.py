@@ -433,7 +433,7 @@ class UiFrameSelectionWidget(PageNavigation):
             return False
 
         results = self.replay_widget.replay(
-                screenshots = "selecting_frames",
+                screenshots="selecting_frames",
                 hwc=False,
                 repeat=1,
                 fastforward=False,
@@ -449,12 +449,14 @@ class UiFrameSelectionWidget(PageNavigation):
                 logger.debug(f"Unable to load image: {path_file}")
                 continue
             if (pixmap.height() >= pixmap.width()):
-                scaled_pixmap = pixmap.scaledToHeight(700)
+                scaled_pixmap = pixmap.scaledToHeight(self.height() // 1.5)
             else:
-                scaled_pixmap = pixmap.scaledToWidth(700)
+                scaled_pixmap = pixmap.scaledToWidth(self.width() // (len(self.frames) + 1))
             img = QLabel()
-            img.setPixmap(scaled_pixmap)
             img.setAlignment(Qt.AlignCenter)
+
+            img._original_pixmap = pixmap
+            img.setPixmap(scaled_pixmap)
 
             label_frame = QLabel(f"Frame {path.split('_')[-1].split('.')[0]}")
             label_frame.setAlignment(Qt.AlignCenter)
@@ -467,3 +469,51 @@ class UiFrameSelectionWidget(PageNavigation):
             self.frames_displayed.addWidget(total_widget)
         _helper_string =  ", ".join([f"{f}" for f in self.frame_num_list])
         self.frame_label.setText(f"Selected frame(s): {_helper_string}")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+
+        for i in range(self.frames_displayed.count()):
+            item = self.frames_displayed.itemAt(i)
+            if item is None:
+                continue
+            container = item.widget()
+            if container is None:
+                continue
+            layout = container.layout()
+            if layout is None or layout.count() == 0:
+                continue
+            img_label = layout.itemAt(0).widget()
+            if not isinstance(img_label, QLabel):
+                continue
+
+            orig = getattr(img_label, "_original_pixmap", None)
+            if orig is None or orig.isNull():
+                orig = img_label.pixmap()
+            if orig is None or orig.isNull():
+                continue
+
+            pixel_ratio = orig.devicePixelRatio() or 1.0
+            orig_width = orig.width() / pixel_ratio
+            orig_height = orig.height() / pixel_ratio
+            target_height = 0
+            target_width = 0
+            if orig_width < orig_height:
+                target_height = event.size().height() // 1.5
+                aspect = orig_height / orig_width
+                target_width = target_height * aspect
+            else:
+                target_width = event.size().width() // (len(self.frames) + 1)
+                aspect = orig_height / orig_width
+                target_height = target_width * aspect
+            if target_width <= 0:
+                continue
+
+            scaled = orig.scaled(
+                int(target_width),
+                int(target_height),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+
+            img_label.setPixmap(scaled)
