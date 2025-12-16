@@ -3,7 +3,7 @@ import os
 from core.config import ConfigSettings
 from PySide6.QtCore import Qt, Signal, QEventLoop, QThread, QObject, QRect
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QLineEdit, QPushButton, QFormLayout, QScrollArea, QAbstractButton, QMessageBox
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QLineEdit, QPushButton, QFormLayout, QScrollArea, QAbstractButton, QMessageBox, QSizePolicy
 from core.page_navigation import PageNavigation, PageIndex
 from core.adb_thread import AdbThread
 import subprocess
@@ -11,14 +11,16 @@ from core.logger_config import setup_logger
 
 logger = setup_logger("framerange")
 
+
 class PixMapHelper(QObject):
     results = Signal(object)
     finished = Signal()
 
-    def __init__(self, images, remove_alpha=False):
+    def __init__(self, images, remove_alpha=False, thumb_px=400):
         super().__init__()
         self.images = images
         self.remove_alpha = remove_alpha
+        self.thumb_px = thumb_px
 
     def makePictures(self):
         list_imgs = []
@@ -28,16 +30,18 @@ class PixMapHelper(QObject):
         if self.remove_alpha:
             base_path = str(Path(self.images[0]).parent)
             cmd = ["mogrify", "-alpha", "off", f"{base_path}/*.png"]
-            process = subprocess.run(" ".join(cmd), shell=True, capture_output=True)
+            process = subprocess.run(
+                " ".join(cmd), shell=True, capture_output=True)
         for img in self.images:
             pixmap = QPixmap(img)
             if pixmap.isNull():
                 logger.info(f"Unable to load image: {img}")
                 continue
-            list_imgs.append(pixmap)
+            scaled_pixmap = pixmap.scaled(
+                self.thumb_px, self.thumb_px, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            list_imgs.append(scaled_pixmap)
         self.results.emit(list_imgs)
         self.finished.emit()
-
 
 
 class ImgButton(QAbstractButton):
@@ -60,9 +64,11 @@ class ImgButton(QAbstractButton):
         try:
             if not self._pixmap.isNull():
                 target_size = self._pixmap.size().scaled(self.size(), Qt.KeepAspectRatio)
-                x = (self.width()  - target_size.width())  // 2
+                x = (self.width() - target_size.width()) // 2
                 y = (self.height() - target_size.height()) // 2
-                target_rect = QRect(x, y, target_size.width(), target_size.height())
+                target_rect = QRect(
+                    x, y, target_size.width(),
+                    target_size.height())
                 painter.drawPixmap(target_rect, self._pixmap)
 
             if self.isChecked():
@@ -73,6 +79,7 @@ class ImgButton(QAbstractButton):
         finally:
             painter.end()
 
+
 class UiFrameRangeWidget(PageNavigation):
     gotoframeselection_signal = Signal()
 
@@ -82,21 +89,26 @@ class UiFrameRangeWidget(PageNavigation):
         self.current_focus_image_index = 0
         self.current_range_start = 0
         self.current_range_end = 0
+        self.current_focus_image_path = None
+        self.current_focus_pixmap = None
+        self._thumb_px = 200
         self.images = None
         self.frame_timeline = QHBoxLayout()
         self.v_layout = QVBoxLayout()
         self.timeline_widget = QWidget()
         self.timeline_widget.setLayout(self.frame_timeline)
         self.framerange_edit_label = QLabel()
-        self.framerange_header = QLabel()
+        #self.framerange_header = QLabel()
         self.framerange_label = QLabel()
+        self.page_info = QLabel()
         self.framerange_frame = QLabel()
         self.framerange_input = QLineEdit()
-        self.start_select_button = QPushButton("Start")
-        self.end_select_button = QPushButton("End")
+        self.start_select_button = QPushButton("Set to start frame")
+        self.end_select_button = QPushButton("Set to end frame")
         self.download_button = QPushButton("Download trace")
         self.continue_select_button = QPushButton("End")
-        self.remove_alpha = QPushButton("Transparent images? Remove alpha channels")
+        self.remove_alpha = QPushButton(
+            "Transparent images? Remove alpha channels")
         self.frame_focus = QLabel()
         self.missing_img = QLabel()
         self.status = QLabel()
@@ -106,7 +118,60 @@ class UiFrameRangeWidget(PageNavigation):
         self.frame_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.frame_scroll.setWidgetResizable(True)
         self.frame_scroll.setWidget(self.timeline_widget)
+        self.frame_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.frame_scroll.setMinimumHeight(200)
+
+        # Page naviagtion variables
+        self.images_per_page = 20
+        self.current_page = 0
+        self.total_pages = 0
+
         self.setupWidgets()
+
+    def _apply_focus_pixmap(self):
+        """
+        Scale the current focus pixmap to the label while preserving aspect ratio.
+        """
+        if not self.current_focus_pixmap:
+            return
+        if self.frame_focus.width() == 0 or self.frame_focus.height() == 0:
+            return
+        scaled = self.current_focus_pixmap.scaled(
+            self.frame_focus.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        self.frame_focus.setPixmap(scaled)
+
+    def _set_focus_image(self, img_path):
+        if not img_path:
+            return
+        pixmap = QPixmap(img_path)
+        if pixmap.isNull():
+            return
+        self.current_focus_pixmap = pixmap
+        self._apply_focus_pixmap()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_focus_pixmap()
+
+    def updatePageNavButtons(self):
+        """
+        Enable or disable navigation buttons based on the current page.
+        """
+        # Disable "First Page" and "Previous Page" buttons on the first page
+        if self.current_page == 0:
+            self.first_page_button.setEnabled(False)
+            self.prev_page_button.setEnabled(False)
+        else:
+            self.first_page_button.setEnabled(True)
+            self.prev_page_button.setEnabled(True)
+        # Disable "Next Page" and "Last Page" buttons on the last page
+        if self.current_page == self.total_pages - 1:
+            self.next_page_button.setEnabled(False)
+            self.last_page_button.setEnabled(False)
+        else:
+            self.next_page_button.setEnabled(True)
+            self.last_page_button.setEnabled(True)
 
     def getImages(self):
         """
@@ -118,13 +183,15 @@ class UiFrameRangeWidget(PageNavigation):
         self.img_path = Path(search_path)
         self.images = list(self.img_path.glob('**/*.png'))
         if not self.images:
-            logger.debug(f"Found no images with mask: '**/*.png', trying again with **/*.bmp")
+            logger.debug(
+                f"Found no images with mask: '**/*.png', trying again with **/*.bmp")
             self.images = list(self.img_path.glob('**/*.bmp'))
 
             if not self.images:
                 logger.debug(f"Found no images in {search_path}")
             else:
-                logger.info(f"Found {len(self.images)} images in {search_path}!")
+                logger.info(
+                    f"Found {len(self.images)} images in {search_path}!")
 
         self.image_indices = []
         for image_path in self.images:
@@ -135,11 +202,16 @@ class UiFrameRangeWidget(PageNavigation):
                 self.image_indices.append(int(frame))
             except ValueError:
                 self.image_indices.append(-1)
-                logger.error(f"Invalid snapshot image name format for image: {image_path}")
+                logger.error(
+                    f"Invalid snapshot image name format for image: {image_path}")
 
-        zip_sorted = sorted(zip(self.images, self.image_indices), key=lambda x: x[1])
+        zip_sorted = sorted(
+            zip(self.images, self.image_indices),
+            key=lambda x: x[1])
         self.images = [x[0] for x in zip_sorted]
         self.image_indices = [x[1] for x in zip_sorted]
+        self.total_pages = (len(
+            self.image_indices) + self.images_per_page - 1) // self.images_per_page if self.image_indices else 0
 
         logger.info("Loading images...")
         QApplication.processEvents()
@@ -151,9 +223,10 @@ class UiFrameRangeWidget(PageNavigation):
         """
         Set up the widgets and pictures
         """
-        self.framerange_header.setText("Select frame range")
-        self.framerange_frame.setText("Frame: 0")
-        self.framerange_label.setText("Current framerange: 0-0")
+        self.page_info.setText("Page: 1/1")
+        #self.framerange_header.setText("Chosen Frame & Range:")
+        self.framerange_frame.setText("Current Frame: 0")
+        self.framerange_label.setText("Selected framerange: 0-0")
         self.framerange_edit_label.setText("Range override (<start>-<end>): ")
 
         self.remove_alpha.clicked.connect(self.removeAlpha)
@@ -171,15 +244,26 @@ class UiFrameRangeWidget(PageNavigation):
 
     def reloadImages(self, remove_alpha=False):
         """Reloads images in the scroll area without rebuilding other widgets."""
-        self.status.setText("Reloading images. Please wait...")
-        print("[ INFO ] Reloading images without alpha channels")
+        self.status.setText("Loading images. Please wait...")
+        if remove_alpha:
+            self.status.setText(
+                "Removing alpha channel and reloading images. Please wait...")
+            logger.info("[ INFO ] Reloading images without alpha channels")
         QApplication.processEvents()
 
         self.cleanupBoxLayout(self.frame_timeline)
+        # Load a section of images using currant_page and images per page
+        start_index = self.current_page * self.images_per_page
+        end_index = start_index + self.images_per_page
+        page_nav_images = self.images[start_index:end_index]
+
+        if not page_nav_images:
+            logger.debug("No pixmaps to display on this page.")
+            return
 
         self.thread = QThread()
         self.eventloop = QEventLoop()
-        self.worker = PixMapHelper(self.images, remove_alpha=remove_alpha)
+        self.worker = PixMapHelper(page_nav_images, remove_alpha=remove_alpha)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.makePictures)
         self.worker.finished.connect(self.thread.quit)
@@ -196,9 +280,10 @@ class UiFrameRangeWidget(PageNavigation):
     def updatePictureWidgets(self):
         if self.images:
             self.frame_focus = QLabel()
-            pixmap = QPixmap(self.images[0])
-            scaled_pixmap = pixmap.scaledToHeight(450)
-            self.frame_focus.setPixmap(scaled_pixmap)
+            self.current_focus_image_path = self.images[0]
+            self.frame_focus.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            self.frame_focus.setMinimumHeight(300)
+            self._set_focus_image(self.current_focus_image_path)
             self.frame_focus.setAlignment(Qt.AlignCenter)
             self.status.setAlignment(Qt.AlignCenter)
             self.framerange_edit_label.hide()
@@ -207,7 +292,10 @@ class UiFrameRangeWidget(PageNavigation):
         else:
             self.missing_img.setText(f"No images found in: {self.img_path}")
             self.frame_focus.hide()
+            self.page_info.hide()
             self.framerange_edit_label.show()
+            self.framerange_frame.hide()
+            self.framerange_label.hide()
             self.framerange_input.show()
             self.start_select_button.hide()
             self.end_select_button.hide()
@@ -226,22 +314,23 @@ class UiFrameRangeWidget(PageNavigation):
 
     def setupLayouts(self):
         """
-        Set up frame range page layout
+        Set up frame range page layout with page nav buttons.
         """
         input_layout = QFormLayout()
         input_layout.addRow(self.framerange_edit_label, self.framerange_input)
 
         self.cleanupBoxLayout(self.frame_timeline)
-        self.v_layout.addWidget(self.framerange_header)
+        self.v_layout.addWidget(self.page_info)
+        #self.v_layout.addWidget(self.framerange_header)
         self.v_layout.addWidget(self.framerange_frame)
         self.v_layout.addWidget(self.framerange_label)
 
         # Clear existing timeline items
         if self.images:
-            self.v_layout.addWidget(self.frame_focus)
+            self.v_layout.addWidget(self.frame_focus, 2)
             self.thread = QThread()
             self.eventloop = QEventLoop()
-            self.worker = PixMapHelper(self.images)
+            self.worker = PixMapHelper(self.images, thumb_px=self._thumb_px)
             self.worker.moveToThread(self.thread)
             self.thread.started.connect(self.worker.makePictures)
             self.worker.finished.connect(self.thread.quit)
@@ -250,19 +339,23 @@ class UiFrameRangeWidget(PageNavigation):
             self.worker.results.connect(self.thread_completed)
             self.thread.start()
             self.eventloop.exec()
-
+            reload_layout = QHBoxLayout()
+            reload_layout.addWidget(self.status, 1)
+            reload_layout.addWidget(self.remove_alpha, 0 , Qt.AlignRight)
+            self.v_layout.addLayout(reload_layout)
             self.createScrollArea()
-            self.v_layout.addWidget(self.frame_scroll)
+            self.v_layout.addWidget(self.frame_scroll, 1)
+
         else:
             self.v_layout.addWidget(self.missing_img)
             self.v_layout.addLayout(input_layout)
 
-        self.v_layout.addWidget(self.start_select_button)
-        self.v_layout.addWidget(self.end_select_button)
-        self.v_layout.addWidget(self.continue_select_button)
         self.v_layout.addWidget(self.download_button)
-        self.v_layout.addWidget(self.remove_alpha)
-        self.v_layout.addWidget(self.status)
+        frame_range_layout = QHBoxLayout()
+        frame_range_layout.addWidget(self.start_select_button)
+        frame_range_layout.addWidget(self.end_select_button)
+        frame_range_layout.addWidget(self.continue_select_button)
+        self.v_layout.addLayout(frame_range_layout)
 
         self.setLayout(self.v_layout)
 
@@ -272,30 +365,95 @@ class UiFrameRangeWidget(PageNavigation):
         if self.eventloop:
             self.eventloop.quit()
 
+    def navigatePage(self, action):
+        """
+        Navigate to a specific page based on the action.
+
+        Args:
+            action (str): The navigation action. Can be one of:
+                        'first', 'last', 'prev', 'next'.
+        """
+        if action == "first":
+            self.current_page = 0
+        elif action == "last":
+            self.current_page = self.total_pages - 1
+        elif action == "prev" and self.current_page > 0:
+            self.current_page -= 1
+        elif action == "next" and self.current_page < self.total_pages - 1:
+            self.current_page += 1
+        else:
+            return
+
+        self.reloadImages()
+
     def createScrollArea(self):
         """
-        Enable scrolling on frame pictures
+        Enable scrolling on frame pictures with navigation arrows.
 
         Return:
             frame_scroll: scrollable widget with frames as buttons
         """
         self.cleanupBoxLayout(self.frame_timeline)
-        for pm in self.pixmaps:
+
+        start_index = self.current_page * self.images_per_page
+        page_nav_pixmaps = self.pixmaps[:self.images_per_page]
+        logger.debug(f"Current page: {self.current_page}")
+        logger.debug(f"Pixmaps on this page: {len(page_nav_pixmaps)}")
+
+        if page_nav_pixmaps:
+            self.current_focus_image_index = self.image_indices[start_index]
+            self.page_info.setText(
+                "Page: {}/{}".format(self.current_page + 1, self.total_pages))
+            self.framerange_frame.setText(
+                "Frame: {}".format(
+                    self.current_focus_image_index))
+
+        # Add "First Page" button (double left arrow)
+        self.first_page_button = QPushButton("«")
+        self.first_page_button.setFixedSize(40, 40)
+        self.first_page_button.clicked.connect(
+            lambda: self.navigatePage("first"))
+        self.frame_timeline.addWidget(self.first_page_button)
+
+        # Add "Previous Page" button (left arrow)
+        self.prev_page_button = QPushButton("←")
+        self.prev_page_button.setFixedSize(40, 40)
+        self.prev_page_button.clicked.connect(
+            lambda: self.navigatePage("prev"))
+        self.frame_timeline.addWidget(self.prev_page_button)
+
+        # Add image buttons
+        for pm in page_nav_pixmaps:
             btn = ImgButton(pm)
-            if pm.height() >= pm.width():
-                btn.setFixedHeight(400)
-                btn.setMinimumWidth(300)
-            else:
-                btn.setFixedWidth(400)
-                btn.setMinimumHeight(50)
+            btn.setFixedSize(self._thumb_px, self._thumb_px)
             btn.setAutoExclusive(True)
             btn.clicked.connect(self.updateFocus)
             self.frame_timeline.addWidget(btn)
 
+        # Add "Next Page" button (right arrow)
+        self.next_page_button = QPushButton("→")
+        self.next_page_button.setFixedSize(40, 40)
+        self.next_page_button.clicked.connect(
+            lambda: self.navigatePage("next"))
+        self.frame_timeline.addWidget(self.next_page_button)
+
+        # Add "Last Page" button (double right arrow)
+        self.last_page_button = QPushButton("»")
+        self.last_page_button.setFixedSize(40, 40)
+        self.last_page_button.clicked.connect(
+            lambda: self.navigatePage("last"))
+        self.frame_timeline.addWidget(self.last_page_button)
+
+        self.updatePageNavButtons()
+
     def downloadTrace(self):
         self.status.setText("Currently downloading. Please wait...")
         _pull_helper = AdbThread()
-        _pull_helper.fileHandler(adb=self.replay_widget.adb, file=self.replay_widget.currentTrace, path="tmp", action="pull")
+        _pull_helper.fileHandler(
+            adb=self.replay_widget.adb,
+            file=self.replay_widget.currentTrace,
+            path="tmp",
+            action="pull")
         msg = QMessageBox()
         msg_text = f" The trace was downloaded here: {os.getcwd()}/tmp"
         msg.setText(msg_text)
@@ -306,29 +464,40 @@ class UiFrameRangeWidget(PageNavigation):
         """
         Update focus to selected frame
         """
-        for i in range(self.frame_timeline.count()):
+        nav_buttons_offset = 2
+        for i in range(
+                nav_buttons_offset, self.frame_timeline.count() -
+                nav_buttons_offset):
             widget = self.frame_timeline.itemAt(i).widget()
             if isinstance(widget, ImgButton):
                 if widget.isChecked():
-                    img = self.images[i]
-                    self.current_focus_image_index = self.image_indices[i]
-                    self.framerange_frame.setText("Frame: {}".format(self.current_focus_image_index))
+                    global_index = self.current_page * self.images_per_page + i - nav_buttons_offset
+                    img = self.images[global_index]
+                    self.current_focus_image_index = self.image_indices[global_index]
+                    self.framerange_frame.setText(
+                        "Frame: {}".format(
+                            self.current_focus_image_index))
+                    self.page_info.setText(
+                        "Page: {}/{}".format(self.current_page + 1, self.total_pages))
 
-        self.frame_focus.setPixmap(QPixmap(img).scaledToHeight(450))
+        self.current_focus_image_path = img
+        self._set_focus_image(self.current_focus_image_path)
 
     def setStartFrame(self):
         """
         Select start frame
         """
         self.current_range_start = self.current_focus_image_index
-        self.framerange_label.setText(f"Current framerange: [{self.current_range_start}-{self.current_range_end})")
+        self.framerange_label.setText(
+            f"Current framerange: [{self.current_range_start}-{self.current_range_end})")
 
     def setEndFrame(self):
         """
         Select end frame
         """
         self.current_range_end = self.current_focus_image_index
-        self.framerange_label.setText(f"Current framerange: [{self.current_range_start}-{self.current_range_end})")
+        self.framerange_label.setText(
+            f"Current framerange: [{self.current_range_start}-{self.current_range_end})")
 
     def validate_framerange(self):
         """
@@ -338,7 +507,8 @@ class UiFrameRangeWidget(PageNavigation):
             bool: False if not valid range, true if valid range
         """
         if self.current_range_start > self.current_range_end:
-            logger.error(f"Selected range start frame is greater than end frame: [{self.current_range_start}-{self.current_range_end})")
+            logger.error(
+                f"Selected range start frame is greater than end frame: [{self.current_range_start}-{self.current_range_end})")
             return False
 
         elif (self.current_range_end == 0 and self.current_range_start == 0):
@@ -346,15 +516,18 @@ class UiFrameRangeWidget(PageNavigation):
             return False
 
         elif self.current_range_start == self.current_range_end:
-            logger.error(f"Selected range start frame is the same as end frame: [{self.current_range_start}-{self.current_range_end})")
+            logger.error(
+                f"Selected range start frame is the same as end frame: [{self.current_range_start}-{self.current_range_end})")
             return False
 
         elif self.current_range_start == -1:
-            logger.error(f"Selected range start frame is invalid: [{self.current_range_start}-{self.current_range_end})")
+            logger.error(
+                f"Selected range start frame is invalid: [{self.current_range_start}-{self.current_range_end})")
             return False
 
         elif self.current_range_end == -1:
-            logger.error(f"Selected range end frame is invalid: [{self.current_range_start}-{self.current_range_end})")
+            logger.error(
+                f"Selected range end frame is invalid: [{self.current_range_start}-{self.current_range_end})")
             return False
 
         return True
@@ -371,7 +544,8 @@ class UiFrameRangeWidget(PageNavigation):
                     start_range = int(tokens[0])
                     end_range = int(tokens[1])
                 except ValueError:
-                    logger.error("The textual framerange input is invalid, must have format: [<int>-<int>). Ignoring.")
+                    logger.error(
+                        "The textual framerange input is invalid, must have format: [<int>-<int>). Ignoring.")
                     return
 
                 self.current_range_start = start_range
@@ -393,7 +567,8 @@ class UiFrameRangeWidget(PageNavigation):
             msg.exec()
             self.next_signal.emit(PageIndex.FRAMERANGE)
             return False
-        logger.info(f"Frame range set to: [{self.current_range_start}-{self.current_range_end})")
+        logger.info(
+            f"Frame range set to: [{self.current_range_start}-{self.current_range_end})")
         self.gotoframeselection_signal.emit()
         self.next_signal.emit(PageIndex.FRAME_SELECTION)
 
@@ -404,6 +579,9 @@ class UiFrameRangeWidget(PageNavigation):
         self.current_focus_image_index = 0
         self.current_range_start = 0
         self.current_range_end = 0
+        self.current_page = 0
+        self.page_info.setText(
+            "Page: 0/0")
         self.framerange_frame.setText("Frame: 0")
         self.framerange_label.setText("Current framerange: 0-0")
         self.framerange_input.clear()
@@ -415,6 +593,7 @@ class UiFrameRangeWidget(PageNavigation):
         """
         Hide or show widgtes on page either during cleanup or setup, respectively
         """
+
         if hasattr(self, "images") and self.images:
             self.framerange_edit_label.hide()
             self.framerange_input.hide()
