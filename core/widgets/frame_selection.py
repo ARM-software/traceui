@@ -12,6 +12,7 @@ from core.logger_config import setup_logger
 
 logger = setup_logger("frame_selection_page")
 
+
 class UiFrameSelectionWidget(PageNavigation):
     PAGE_PREFRAMESELECT = 0
     PAGE_WRITEFRAMES = 1
@@ -38,22 +39,21 @@ class UiFrameSelectionWidget(PageNavigation):
         self.setUpConfirmFrames()
         self.local_output_dir = Path(f'outputs/traces/')
 
-
-
     def setupWidgets(self):
         """
         Set up widgets, pre-frame selection
         """
-        self.label = QLabel("How many representative frames for the chosen range is desired")
+        self.label = QLabel(
+            "How many representative frames for the chosen range is desired")
         self.label.setAlignment(Qt.AlignCenter)
         self.dropdown = QComboBox()
         self.dropdown.addItems(["1", "2", "3"])
         self.button = QPushButton("Continue")
         self.button.clicked.connect(self.update)
-        self.know_frames = QCheckBox("I already know which frame number(s) I would like to use")
+        self.know_frames = QCheckBox(
+            "I already know which frame number(s) I would like to use")
         self.nonmali_button = QPushButton("Go Back")
         self.nonmali_button.clicked.connect(self.goback)
-
 
     def setupLayouts(self):
         """
@@ -70,7 +70,8 @@ class UiFrameSelectionWidget(PageNavigation):
         self.nonmali_button.hide()
         layout.setAlignment(Qt.AlignCenter)
         preselect_widget.setLayout(layout)
-        self.nestedStack.insertWidget(self.PAGE_PREFRAMESELECT, preselect_widget)
+        self.nestedStack.insertWidget(
+            self.PAGE_PREFRAMESELECT, preselect_widget)
 
         top_layout = QVBoxLayout(self)
         top_layout.addWidget(self.nestedStack)
@@ -86,16 +87,21 @@ class UiFrameSelectionWidget(PageNavigation):
         """
         Set up page for writing frame
         """
-        label_informing = QLabel("Please write frame numbers you would like to use")
-        label_informing.setStyleSheet("font-size: 18px; font-weight: bold; color: #444;")
-        label_format = QLabel("Format: single number or comma separeted for multiple frames. eg 5,10,15")
+        label_informing = QLabel(
+            "Please write frame numbers you would like to use")
+        label_informing.setStyleSheet(
+            "font-size: 18px; font-weight: bold; color: #444;")
+        label_format = QLabel(
+            "Format: single number or comma separeted for multiple frames. eg 5,10,15")
         label_informing.setAlignment(Qt.AlignCenter)
         label_format.setAlignment(Qt.AlignCenter)
         self.frame_input = QLineEdit()
         button_continue = QPushButton("Continue")
         button_continue.clicked.connect(self.getFrameStringInput)
         button_goback = QPushButton("Go Back")
-        button_goback.clicked.connect(lambda: self.nestedStack.setCurrentIndex(self.PAGE_PREFRAMESELECT))
+        button_goback.clicked.connect(
+            lambda: self.nestedStack.setCurrentIndex(
+                self.PAGE_PREFRAMESELECT))
 
         layout = QVBoxLayout()
         layout_widget = QWidget()
@@ -127,11 +133,13 @@ class UiFrameSelectionWidget(PageNavigation):
             try:
                 int_list.append(int(string_list[i]))
             except ValueError:
-                msg.setText(f"Please only write numbers. Not allowed: {string_list[i]}")
+                msg.setText(
+                    f"Please only write numbers. Not allowed: {string_list[i]}")
                 msg.exec()
                 return
             if int_list[i] > self.framerange_end:
-                msg.setText(f"Please remain within frame range end, which is {self.framerange_end}.")
+                msg.setText(
+                    f"Please remain within frame range end, which is {self.framerange_end}.")
                 msg.exec()
                 return
         if len(int_list) > 3:
@@ -148,10 +156,13 @@ class UiFrameSelectionWidget(PageNavigation):
         Set up page for frame confirmation
         """
         confirm_label = QLabel("Please confirm the selected frames")
-        confirm_label.setStyleSheet("font-size: 22px; font-weight: bold; color: #444;")
+        confirm_label.setStyleSheet(
+            "font-size: 22px; font-weight: bold; color: #444;")
         confirm_label.setAlignment(Qt.AlignCenter)
         confirm_button = QPushButton("Confirm")
-        confirm_button.clicked.connect(lambda: self.nestedStack.setCurrentIndex(self.PAGE_POSTFRAMESELECT))
+        confirm_button.clicked.connect(
+            lambda: self.nestedStack.setCurrentIndex(
+                self.PAGE_POSTFRAMESELECT))
         redo_button = QPushButton("Redo selection")
         redo_button.clicked.connect(self.cleanup_page)
 
@@ -171,7 +182,6 @@ class UiFrameSelectionWidget(PageNavigation):
         layout_widget.setLayout(layout)
         self.nestedStack.insertWidget(self.PAGE_CONFIRM_FRAMES, layout_widget)
 
-
     def update(self):
         """
         If amount of frames is selected, set page index to loading and compute the frame(s)
@@ -181,7 +191,8 @@ class UiFrameSelectionWidget(PageNavigation):
             self.nonmali_button.show()
             self.dropdown.hide()
             self.know_frames.hide()
-            self.label.setText("Frame selection is not supported on non-Mali devices!")
+            self.label.setText(
+                "Frame selection is not supported on non-Mali devices!")
             return
         self.frames_amount = int(self.dropdown.currentText())
         if self.know_frames.isChecked():
@@ -189,7 +200,6 @@ class UiFrameSelectionWidget(PageNavigation):
         else:
             self.nestedStack.setCurrentIndex(self.PAGE_LOADING)
             QTimer.singleShot(100, self.computeFrames)
-
 
     def detectGpu(self):
         """
@@ -199,11 +209,13 @@ class UiFrameSelectionWidget(PageNavigation):
         if stdout:
             return True
 
-        stdout, _ = self.replay_widget.adb.command([f"dumpsys SurfaceFlinger | grep GLES"])
+        stdout, _ = self.replay_widget.adb.command(
+            [f"dumpsys SurfaceFlinger | grep GLES"])
         for line in stdout.splitlines():
             if "mali" in line.lower():
                 return True
-        logger.warning(f"Not detecting Mali GPU, frame selection will be unavailable!")
+        logger.warning(
+            f"Not detecting Mali GPU, frame selection will be unavailable!")
         return False
 
     def fetch_files_from_device(self, files=None, output_dir=None):
@@ -224,7 +236,8 @@ class UiFrameSelectionWidget(PageNavigation):
 
         outputs = []
         if not output_dir:
-            output_dir = self.local_output_dir / Path(self.replay_widget.currentTool.plugin_name)
+            output_dir = self.local_output_dir / Path(
+                self.replay_widget.currentTool.plugin_name)
         for file_path in files:
             logger.debug(f"Fetching result file: {file_path}")
             stdout, _ = self.replay_widget.adb.command(
@@ -243,21 +256,29 @@ class UiFrameSelectionWidget(PageNavigation):
         """
         Generate HWC data
         """
-        desired_output_dir = self.local_output_dir / self.replay_widget.currentTool.plugin_name / "results/frame_selection"
+        desired_output_dir = self.local_output_dir / \
+            self.replay_widget.currentTool.plugin_name / "results/frame_selection"
         if not os.path.exists(desired_output_dir):
             os.makedirs(desired_output_dir)
 
-        logger.info(f"Storing frame selection results in: {str(desired_output_dir)}")
+        logger.info(
+            f"Storing frame selection results in: {str(desired_output_dir)}")
 
         if not results.get("hwc_path"):
-            logger.error(f"Frame selection post processing failed. No HWC results found after replay.")
+            logger.error(
+                f"Frame selection post processing failed. No HWC results found after replay.")
         else:
-            self.fetch_files_from_device(files=results["hwc_path"], output_dir=desired_output_dir)
-            self.expected_local_output = os.path.join(desired_output_dir, os.path.basename(results["hwc_path"]))
+            self.fetch_files_from_device(
+                files=results["hwc_path"],
+                output_dir=desired_output_dir)
+            self.expected_local_output = os.path.join(
+                desired_output_dir, os.path.basename(results["hwc_path"]))
             if not os.path.exists(self.expected_local_output):
-                logger.error(f"HWC data generation failed, expected output does not exist: {self.expected_local_output}")
+                logger.error(
+                    f"HWC data generation failed, expected output does not exist: {self.expected_local_output}")
             else:
-                logger.info(f"HWC data generated successfully! Stored locally in: {self.expected_local_output}")
+                logger.info(
+                    f"HWC data generated successfully! Stored locally in: {self.expected_local_output}")
             return desired_output_dir
 
     def errorHWCHandeling(self):
@@ -268,17 +289,23 @@ class UiFrameSelectionWidget(PageNavigation):
         msg_box = QMessageBox(self)
         msg_box.setIcon(QMessageBox.Question)
         msg_box.setWindowTitle('')
-        msg_box.setText("HWC generation failed. Do you wish to retry replay or download the trace to tmp/ and restart")
+        msg_box.setText(
+            "HWC generation failed. Do you wish to retry replay or download the trace to tmp/ and restart")
 
         retry_button = msg_box.addButton("Retry replay", QMessageBox.YesRole)
-        download_button = msg_box.addButton("Download trace", QMessageBox.ActionRole)
+        download_button = msg_box.addButton(
+            "Download trace", QMessageBox.ActionRole)
         cancel_button = msg_box.addButton("Do not replay", QMessageBox.NoRole)
         msg_box.exec()
         if msg_box.clickedButton() == retry_button:
             self.computeFrames()
         elif msg_box.clickedButton() == download_button:
             thread_helper = AdbThread()
-            thread_helper.fileHandler(adb=self.replay_widget.adb, file=self.replay_widget.currentTrace, path="tmp", action="pull")
+            thread_helper.fileHandler(
+                adb=self.replay_widget.adb,
+                file=self.replay_widget.currentTrace,
+                path="tmp",
+                action="pull")
             self.cleanup_page()
             self.next_signal.emit(PageIndex.START)
         else:
@@ -290,7 +317,8 @@ class UiFrameSelectionWidget(PageNavigation):
         """
         Compute the frames and change label to tell user the # of the picked frame(s)
         """
-        self.waiting_label.setText("Currently replaying the trace and selecting frames. Please wait...")
+        self.waiting_label.setText(
+            "Currently replaying the trace and selecting frames. Please wait...")
         results = self.replay_widget.replay(
             screenshots=False,
             hwc=True,
@@ -300,8 +328,9 @@ class UiFrameSelectionWidget(PageNavigation):
             to_frame=self.framerange_end,
             extra_args=self.replay_widget.currentTool.extra_args,
         )
-        if results == None:
-            self.waiting_label.setText("Cannot set up hwc pipe layer on the device. Device may be unrooted")
+        if results is None:
+            self.waiting_label.setText(
+                "Cannot set up hwc pipe layer on the device. Device may be unrooted")
             return
         desired_output_dir = self._hwcHelper(results)
         if self.expected_local_output is None:
@@ -309,7 +338,11 @@ class UiFrameSelectionWidget(PageNavigation):
             return
         if self.frames_amount:
             logger.info(f"Selecting {self.frames_amount} frames")
-            self.frames = select_frames(self.expected_local_output, self.framerange_start, self.framerange_end, self.frames_amount)
+            self.frames = select_frames(
+                self.expected_local_output,
+                self.framerange_start,
+                self.framerange_end,
+                self.frames_amount)
         else:
             self.cleanup_page()
 
@@ -329,8 +362,13 @@ class UiFrameSelectionWidget(PageNavigation):
 
         logger.info(f"Results stored in: {frame_selection_json}")
         _pull_helper = AdbThread()
-        _pull_helper.fileHandler(adb=self.replay_widget.adb, file=self.replay_widget.currentTrace, path=desired_output_dir, action="pull")
-        self.location_label.setText(f"Location of trace and selected frame information: {os.getcwd()}/{desired_output_dir}")
+        _pull_helper.fileHandler(
+            adb=self.replay_widget.adb,
+            file=self.replay_widget.currentTrace,
+            path=desired_output_dir,
+            action="pull")
+        self.location_label.setText(
+            f"Location of trace and selected frame information: {os.getcwd()}/{desired_output_dir}")
         logger.info("Frame selection is completed.")
         self.frame_num_list = []
         for i in range(len(self.frames)):
@@ -347,7 +385,8 @@ class UiFrameSelectionWidget(PageNavigation):
         self.waiting_label = QLabel("Please wait...")
         loading_widget = QWidget()
         self.waiting_label.setAlignment(Qt.AlignCenter)
-        self.waiting_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #444;")
+        self.waiting_label.setStyleSheet(
+            "font-size: 16px; font-weight: bold; color: #444;")
         self.waiting_label.setAlignment(Qt.AlignCenter)
 
         h_layout = QVBoxLayout(loading_widget)
@@ -356,8 +395,6 @@ class UiFrameSelectionWidget(PageNavigation):
         h_layout.addStretch()
         loading_widget.setLayout(h_layout)
         self.nestedStack.insertWidget(self.PAGE_LOADING, loading_widget)
-
-
 
     def setUpFinished(self):
         """
@@ -379,7 +416,6 @@ class UiFrameSelectionWidget(PageNavigation):
         nested_widget.setLayout(layout)
         self.nestedStack.insertWidget(self.PAGE_POSTFRAMESELECT, nested_widget)
 
-
     def cleanup_page(self):
         """
         Go to pre frame select page and reset variables
@@ -388,7 +424,9 @@ class UiFrameSelectionWidget(PageNavigation):
         self.waiting_label.setText("Please wait...")
         pkg = self.replay_widget.currentTool.replayer["name"]
         self.replay_widget.adb.command(["am", "kill-all"], run_with_sudo=True)
-        self.replay_widget.adb.command(["am", "force-stop", pkg], run_with_sudo=True)
+        self.replay_widget.adb.command(
+            ["am", "force-stop", pkg],
+            run_with_sudo=True)
         if self.expected_local_output:
             Path(self.expected_local_output).unlink(missing_ok=True)
         self.expected_local_output = None
@@ -397,7 +435,6 @@ class UiFrameSelectionWidget(PageNavigation):
         self.frame_num_list = None
         self.frame_input.clear()
         self.cleanUpConfirmationFrames()
-
 
     def cleanUpConfirmationFrames(self):
         """
@@ -428,7 +465,8 @@ class UiFrameSelectionWidget(PageNavigation):
         """
         Generate screenshot(s) for confirming frame(s) by replaying and taking screenshots of wanted frames
         """
-        self.waiting_label.setText("Getting relevant screenshots. Please wait...")
+        self.waiting_label.setText(
+            "Getting relevant screenshots. Please wait...")
         if not self.frame_num_list:
             return False
 
@@ -444,6 +482,9 @@ class UiFrameSelectionWidget(PageNavigation):
         for path in results['screenshot_path']:
             self.replay_widget.adb.pull(path, "tmp")
             path_file = f"tmp/{path.split('/')[-1]}"
+            cmd = ["convert", path_file, "-alpha", "off", path_file]
+            process = subprocess.run(
+                " ".join(cmd), shell=True, capture_output=True)
             pixmap = QPixmap(path_file)
             if pixmap.isNull():
                 logger.debug(f"Unable to load image: {path_file}")
@@ -451,7 +492,8 @@ class UiFrameSelectionWidget(PageNavigation):
             if (pixmap.height() >= pixmap.width()):
                 scaled_pixmap = pixmap.scaledToHeight(self.height() // 1.5)
             else:
-                scaled_pixmap = pixmap.scaledToWidth(self.width() // (len(self.frames) + 1))
+                scaled_pixmap = pixmap.scaledToWidth(
+                    self.width() // (len(self.frame_num_list) + 1))
             img = QLabel()
             img.setAlignment(Qt.AlignCenter)
 
@@ -467,7 +509,7 @@ class UiFrameSelectionWidget(PageNavigation):
             total_widget = QWidget()
             total_widget.setLayout(layout)
             self.frames_displayed.addWidget(total_widget)
-        _helper_string =  ", ".join([f"{f}" for f in self.frame_num_list])
+        _helper_string = ", ".join([f"{f}" for f in self.frame_num_list])
         self.frame_label.setText(f"Selected frame(s): {_helper_string}")
 
     def resizeEvent(self, event):
