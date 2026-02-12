@@ -202,13 +202,20 @@ class tracetool(object):
         else:
             logger.debug(f"App ({app}) is already stopped")
 
-        self.adb.command(['chmod', 'o+rw', self.capture_file_fullpath], True)
-        self.adb.pull(self.capture_file_fullpath, 'tmp')
-        optimized_trace = self.optimize_trace(f"tmp/{self.capture_file_name}")
-        if optimized_trace is not None:
-            self.adb.push(optimized_trace, self.sdcard_working_dir, device=None, track=False)
-            self.capture_file_name = f'{Path(self.capture_file_name).stem}.optimized.gfxr'
-
+        #Check for tracefile and rename it to _self.capture_file_name
+        grep_string = f'{str(self.capture_file_fullpath).rsplit(".")[0]}*'
+        stdout, _ = self.adb.command(['ls', grep_string], True)
+        if stdout:
+            logger.info(f"Found tracefile: {stdout}")
+            if stdout != str(self.capture_file_fullpath):
+                logger.info(f"Renaming tracefile: {stdout}, moving to {self.capture_file_fullpath}")
+                self.adb.command(['mv', stdout, self.capture_file_fullpath])
+            self.adb.command(['chmod', 'o+rw', self.capture_file_fullpath], True)
+            self.adb.pull(self.capture_file_fullpath, 'tmp')
+            optimized_trace = self.optimize_trace(f"tmp/{self.capture_file_name}")
+            if optimized_trace is not None:
+                self.adb.push(optimized_trace, self.sdcard_working_dir, device=None, track=False)
+                self.capture_file_name = f'{Path(self.capture_file_name).stem}.optimized.gfxr'
 
         return self.sdcard_working_dir / self.capture_file_name
 
