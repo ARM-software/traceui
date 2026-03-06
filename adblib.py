@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import subprocess
+import time
 import re
 import os
 import zipfile
@@ -306,28 +307,143 @@ class adb(object):
             self.command(['setprop', n, self.restore_props[n]], False, device)
             del self.restore_props[n]
 
-    def push(self, file, path, device=None, track=True):
+    def push(self, file, path, device=None, track=True, progress_callback=None, stop_event=None):
         """Pushes a file to the device"""
         device = self.__check_device(device)
         basename = os.path.basename(file)
+        total_size = os.path.getsize(file)
+        remote_temp_path = f"/sdcard/{basename}"
         logger.info(f"Pushing file from local path {file} to /sdcard/")
-        subprocess.run(['adb', '-s', device, 'push', file, '/sdcard/'], capture_output=True, text=True)  # copy to sdcard first
+        self._emit_progress(progress_callback, 0, f"Preparing to push {basename}")
+
+        push_cmd = ['adb', '-s', device, 'push', '-p', file, '/sdcard/']
+        push_return = self._run_subprocess_with_progress(
+            push_cmd,
+            progress_callback,
+            f"Pushing {basename} to /sdcard/",
+            stop_event=stop_event,
+            total_size=total_size,
+            poll_path=remote_temp_path,
+            poll_remote=True,
+            device=device,
+        )
+        if push_return == "cancelled":
+            logger.info(f"Push for {basename} cancelled by user")
+            return False
+        if push_return:
+            logger.error(f"adb push failed for {basename} with return code {push_return}")
+            return False
+
         self.command(['mkdir', '-p', path], True, device)  # make sure destination exists
         logger.debug(f"Moving file from device path /sdcard/ to device path {path}")
         self.command(['mv', '/sdcard/%s' % basename, path], True, device)
         file_path = str(path) + '/' + str(basename)
 
         self.command(['chmod', 'a+r', file_path], True, device)
+        self._emit_progress(progress_callback, 95, f"Applying permissions to {file_path}")
 
         if track and file_path not in self.added_files:
             self.added_files.append(file_path)
 
-    def pull(self, file, path, device=None):
+        self._emit_progress(progress_callback, 100, f"Finished pushing {basename}")
+        return True
+
+    def pull(self, file, path, device=None, progress_callback=None, stop_event=None):
         """Pulls a file from the device (adb pull)"""
         device = self.__check_device(device)
         subprocess.run(['mkdir', '-p', path], capture_output=True, text=True).stdout.strip()
         logger.debug(f"Pulling file from device path {file} to local path {path}")
-        return subprocess.run(['adb', '-s', device, 'pull', file, path], capture_output=True, text=True).stdout.strip()
+        self._emit_progress(progress_callback, 0, f"Preparing to pull {file}")
+        total_size = None
+        try:
+            size_out, _ = self.command(['stat', '-c%s', file], device=device)
+            total_size = int(size_out.strip())
+        except Exception:
+            total_size = None
+        local_dest = os.path.join(path, os.path.basename(file))
+        pull_cmd = ['adb', '-s', device, 'pull', '-p', file, path]
+        pull_return = self._run_subprocess_with_progress(
+            pull_cmd,
+            progress_callback,
+            f"Pulling {os.path.basename(file)} to {path}",
+            stop_event=stop_event,
+            total_size=total_size,
+            poll_path=local_dest,
+            poll_remote=False,
+            device=device,
+        )
+        if pull_return == "cancelled":
+            logger.info(f"Pull for {file} cancelled by user")
+            return False
+        if pull_return:
+            logger.error(f"adb pull failed for {file} with return code {pull_return}")
+            return False
+
+        self._emit_progress(progress_callback, 100, f"Finished pulling {file}")
+        return True
+
+    def _emit_progress(self, callback, percent, message):
+        """Emit progress updates for adb transfers."""
+        if callback:
+            callback(percent, message)
+
+    def _run_subprocess_with_progress(self, cmd, progress_callback, description, stop_event=None, total_size=None, poll_path=None, poll_remote=False, device=None):
+        """
+        Execute a subprocess command, streaming percentage progress to callback when available.
+        """
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        state = {
+            "last_percent": 0,
+            "last_emit_time": time.time(),
+            "last_log_dump": time.time(),
+        }
+        heartbeat_interval = 1
+
+        def _emit_percent(percent):
+            if percent is None or percent == state["last_percent"]:
+                return
+            self._emit_progress(progress_callback, percent, f"{description} ({percent}%)")
+            state["last_percent"] = percent
+            state["last_emit_time"] = time.time()
+
+        def _percent_from_poll():
+            if not (total_size and poll_path):
+                return None
+            try:
+                if poll_remote:
+                    size_out, _ = self.command(['stat', '-c%s', poll_path], device=device, errors_handled_externally=True, print_command=False)
+                    polled_size = int(size_out.strip()) if size_out else None
+                else:
+                    polled_size = os.path.getsize(poll_path) if os.path.exists(poll_path) else None
+                if polled_size is None:
+                    return None
+                return int(min(100, max(1, polled_size * 100 / total_size)))
+            except (OSError, ValueError) as e:
+                logger.debug(f"Failed to poll transfer progress for {poll_path}: {e}")
+                return None
+
+        if progress_callback:
+            _emit_percent(0)
+
+        # Poll stdout without blocking so we can emit heartbeats regularly
+        while process.poll() is None:
+            if stop_event and stop_event.is_set():
+                process.terminate()
+                self._emit_progress(progress_callback, state["last_percent"], f"{description} (cancelled)")
+                return "cancelled"
+
+            if progress_callback and time.time() - state["last_emit_time"] >= heartbeat_interval:
+                polled_percent = _percent_from_poll()
+                _emit_percent(polled_percent)
+
+        process.wait()
+        return process.returncode
 
     def apps(self, all=False, device=None):
         """Returns a list of packages/apps"""

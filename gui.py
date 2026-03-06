@@ -48,7 +48,7 @@ class MainWindow(QMainWindow):
         self.currentTrace = ""
         self.skip_replay = False
         self.is_importing = False
-
+        self.cancelled_trace_upload = False
         self.currentTool = None
         self.trace = None
         self.widget = QWidget()
@@ -71,6 +71,8 @@ class MainWindow(QMainWindow):
         """
         current_index = self.stacked.currentIndex()
         self.stacked.setCurrentIndex(index)
+        if index == PageIndex.REPLAY:
+            self.pages[PageIndex.REPLAY].reset_status_label()
 
         if index < current_index:
             # Always load import window at import page
@@ -248,12 +250,13 @@ class MainWindow(QMainWindow):
         """
         Update variables based on checked boxes and call function to configure replay widget
         """
-        self.stacked.setCurrentIndex(PageIndex.REPLAY)
+
         self.currentTool = self.widget_import.target_plugin_name
         self.currentTrace = Path(self.widget_import.trace)
         self.skip_replay = self.widget_import.skip_replay
         self.is_importing = True
-
+        cancelled = False
+        self.cancelled_trace_upload = False
         # TODO: Set this properly
         target_path = Path("/sdcard/devlib-target/")
         self.adb.clear_logcat()
@@ -268,13 +271,28 @@ class MainWindow(QMainWindow):
 
         if (not trace_exists_on_device) or self.widget_import.override_trace_if_existing:
             self.helper_thread = AdbThread()
-            self.helper_thread.fileHandler(adb=self.adb, file=self.currentTrace, path=target_path, track=self.widget_import.delete_trace_on_shutdown, action="push")
+            cancelled = self.helper_thread.run_with_progress(
+                parent=self,
+                title="Uploading trace to device...",
+                adb=self.adb,
+                file=self.currentTrace,
+                path=target_path,
+                track=self.widget_import.delete_trace_on_shutdown,
+                action="push",
+                on_cancel=lambda: self.set_page(PageIndex.START),
+            )
+
         elif trace_exists_on_device:
             logger.info(f"Skipping upload of trace file: {self.currentTrace} to device folder {target_path} because it already exists on the target device")
-        self.currentTrace = target_path / os.path.basename(self.currentTrace)
 
+        if cancelled:
+            self.cancelled_trace_upload = True
+            return
+
+        self.currentTrace = target_path / os.path.basename(self.currentTrace)
         logger.info(f"Trace path on device is: {self.currentTrace}")
 
+        self.stacked.setCurrentIndex(PageIndex.REPLAY)
         self.configureReplayWidget()
 
     def loadMenubar(self):
@@ -351,9 +369,13 @@ class MainWindow(QMainWindow):
     def move_to_replay_widget_on_import(self):
         """ Catches a signal (replay_signal) and moves to the replay widget but assume current tool and trace have been set on import """
         self.cleanupTmpReplayImgDir()
-        if not self.is_importing:
-            _pull_helper = AdbThread()
-            _pull_helper.fileHandler(adb=self.adb, file=self.currentTrace, path="tmp", action="pull")
+
+        if self.cancelled_trace_upload:
+            logger.info("trace upload cancelled")
+            self.set_page(PageIndex.START)
+            self.move_to_start_widget()
+            return
+
         if self.skip_replay:
             return
 

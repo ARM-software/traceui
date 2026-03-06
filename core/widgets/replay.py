@@ -174,6 +174,7 @@ class UiReplayWidget(PageNavigation):
         self.plugins = plugins
         self.errorsLastReplay = False
         self._replay_exception = None
+        self._default_replay_label_text = "Please check device for potential infomation if the program remains stuck on this page."
         self.setupLoading()
 
     def setCurrentTool(self, tool):
@@ -192,21 +193,23 @@ class UiReplayWidget(PageNavigation):
         """
         Go to replay page
         """
-        self.replay_label.setText("Please check device for potential information if the program remains stuck on this page.")
+        self.reset_status_label()
         self.errorsLastReplay = False
         self._replay_exception = None
-        pkg = self.currentTool.replayer["name"]
         if hasattr(self, "adbWorker"):
             self.adbWorker.stop()
-        self.adb.command(["am", "kill-all"], run_with_sudo=True)
-        self.adb.command(["am", "force-stop", pkg], run_with_sudo=True)
+        if self.adb and self.currentTool and hasattr(self.currentTool, "replayer"):
+            pkg = self.currentTool.replayer.get("name")
+            self.adb.command(["am", "kill-all"], run_with_sudo=True)
+            if pkg:
+                self.adb.command(["am", "force-stop", pkg], run_with_sudo=True)
 
 
     def setupLoading(self):
         """
         Set up loading screen
         """
-        self.replay_label = QLabel("Please check device for potential infomation if the program remains stuck on this page.")
+        self.replay_label = QLabel(self._default_replay_label_text)
         self.replay_label.setAlignment(Qt.AlignCenter)
         self.replay_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #444;")
         self.replay_label.setAlignment(Qt.AlignCenter)
@@ -215,6 +218,12 @@ class UiReplayWidget(PageNavigation):
         self.h_layout.addWidget(self.replay_label)
         self.h_layout.addStretch()
         self.setLayout(self.h_layout)
+
+    def reset_status_label(self):
+        """
+        Restore the default label text shown on the replay page.
+        """
+        self.replay_label.setText(self._default_replay_label_text)
 
 
     def gotoframe_range_signal(self):

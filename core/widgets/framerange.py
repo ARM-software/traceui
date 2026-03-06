@@ -449,11 +449,18 @@ class UiFrameRangeWidget(PageNavigation):
     def downloadTrace(self):
         self.status.setText("Currently downloading. Please wait...")
         _pull_helper = AdbThread()
-        _pull_helper.fileHandler(
+        cancelled = _pull_helper.run_with_progress(
+            parent=self,
+            title="Downloading trace...",
             adb=self.replay_widget.adb,
             file=self.replay_widget.currentTrace,
             path="tmp",
-            action="pull")
+            action="pull",
+            on_cancel=lambda: None,
+        )
+        if cancelled:
+            self.status.clear()
+            return
         msg = QMessageBox()
         msg_text = f" The trace was downloaded here: {os.getcwd()}/tmp"
         msg.setText(msg_text)

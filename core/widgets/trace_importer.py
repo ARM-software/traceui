@@ -44,6 +44,15 @@ class UiTraceImportWidget(PageNavigation):
         """
         Clean up page and frees variables
         """
+        try:
+            if self.adb and self.target_plugin and hasattr(self.target_plugin, "replayer"):
+                pkg = self.target_plugin.replayer.get("name")
+                if pkg:
+                    self.adb.command(["am", "kill-all"], run_with_sudo=True)
+                    self.adb.command(["am", "force-stop", pkg], run_with_sudo=True)
+        except Exception as e:
+            logger.warning(f"Failed to cleanup replay process during import cleanup: {e}")
+
         self.trace = None
         self.target_plugin = None
         self.skip_replay = None
