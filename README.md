@@ -39,9 +39,16 @@ apt install imagemagick
 Linux
 
 ```
-./run.sh
+./run.sh [--log-level info|debug|warning|error]
 ```
 Which will check for updates and then launch the gui. Follow the onscreen instructions from there.
+
+Logging
+```
+# default: console INFO, file DEBUG
+
+```
+Logs are written to `traceui.log` in the repo root.
 
 ## Outputs
 
