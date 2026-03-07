@@ -367,11 +367,18 @@ class MainWindow(QMainWindow):
         self.replaySettings = UiReplaySettings()
         if self.replaySettings.exec():
             interval = self.replaySettings.getInterval()
+            end_frame = self.replaySettings.getEndFrame()
             logger.info("Generating screenshots..")
             out_path = self.config.get_config()['Paths']['img_path']
             # Go to replay widget
             # self.stacked.setCurrentIndex(PageIndex.REPLAY)
-            self.widget_replay.replay(screenshots="interval", extra_args=extra_args, local_dir=out_path, interval=interval)
+            self.widget_replay.replay(
+                screenshots="interval",
+                extra_args=extra_args,
+                local_dir=out_path,
+                interval=interval,
+                to_frame=end_frame
+            )
 
         self.showLoadingScreen()
         if self.widget_replay.errorsLastReplay:

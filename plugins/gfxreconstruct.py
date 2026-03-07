@@ -328,6 +328,9 @@ class tracetool(object):
                     cmd.extend([f'--screenshots {total_range}'])
                 # replayer produces .bmp - should be converted to .png
 
+            if to_frame:
+                cmd.extend([f'--quit-after-frame {to_frame}'])
+
             if hwc:
                 try:
                     self.__setup_hwcpipe_layer()

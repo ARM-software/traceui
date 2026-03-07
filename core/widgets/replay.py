@@ -49,6 +49,7 @@ class ReplayWorker(QObject):
             subprocess.run(" ".join(self.cmd), shell=True, capture_output=False)
         else:
             self.adb.command(self.cmd)
+            logger.debug(f"Replaying with command: {self.cmd}")
         time.sleep(0.1)
 
         stdout, _ = self.adb.command([f"ps -A | grep {self.process}"])
