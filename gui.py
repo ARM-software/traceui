@@ -49,7 +49,7 @@ class MainWindow(QMainWindow):
         self.skip_replay = False
         self.is_importing = False
         self.cancelled_trace_upload = False
-        self.upload_success = False
+        self.upload_success = True
         self.currentTool = None
         self.trace = None
         self.widget = QWidget()
@@ -259,7 +259,7 @@ class MainWindow(QMainWindow):
         cancelled = False
         success = True
         self.cancelled_trace_upload = False
-        self.upload_success = False
+        self.upload_success = True
         # TODO: Set this properly
         target_path = Path("/sdcard/devlib-target/")
         self.adb.clear_logcat()
