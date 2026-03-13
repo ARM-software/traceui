@@ -627,7 +627,7 @@ class UiTraceWidget(PageNavigation):
         downloading_label = self.app_end_widget.findChild(QLabel, "downloading")
         downloading_label.setText("Currently downloading. Please wait.")
         _pull_helper = AdbThread()
-        cancelled = _pull_helper.run_with_progress(
+        cancelled, success = _pull_helper.run_with_progress(
             parent=self,
             title="Downloading trace...",
             adb=self.adb,
@@ -636,8 +636,12 @@ class UiTraceWidget(PageNavigation):
             action="pull",
             on_cancel=lambda: None,
         )
-        if cancelled:
+        if cancelled or not success:
             downloading_label.clear()
+            if not cancelled:
+                msg = QMessageBox()
+                msg.setText("Trace download failed. Please retry.")
+                msg.exec()
             return
 
         name = str(self.currentTrace).split("/")[-1]

@@ -106,7 +106,8 @@ class AdbThread(QObject):
 
     def run_with_progress(self, parent, title, adb, file, path, track=False, action=None, on_cancel=None):
         """
-        Run an adb file transfer with a progress dialog. Returns True if the user cancelled.
+        Run an adb file transfer with a progress dialog.
+        Returns a tuple: (cancelled: bool, success: bool)
         """
         progress_dialog = QProgressDialog(title, "Cancel", 0, 100, parent)
         progress_dialog.setWindowTitle(title)
@@ -114,17 +115,19 @@ class AdbThread(QObject):
         progress_dialog.setWindowModality(Qt.ApplicationModal)
         progress_dialog.show()
         cancelled = {"value": False}
+        success = {"value": False}
 
         def on_progress(value, message):
             progress_dialog.setValue(value)
             progress_dialog.setLabelText(message)
             QApplication.processEvents()
 
-        def on_finished(_):
+        def on_finished(result):
             try:
                 progress_dialog.canceled.disconnect(on_cancel_clicked)
             except Exception:
                 pass
+            success["value"] = bool(result)
             progress_dialog.setValue(100)
             progress_dialog.close()
 
@@ -139,7 +142,7 @@ class AdbThread(QObject):
         self.progress_signal.connect(on_progress)
         self.operation_finished.connect(on_finished)
         self.fileHandler(adb=adb, file=file, path=path, track=track, action=action)
-        return cancelled["value"]
+        return cancelled["value"], success["value"]
 
     def on_done(self):
         logger.info("FileHandler completed")

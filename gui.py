@@ -49,6 +49,7 @@ class MainWindow(QMainWindow):
         self.skip_replay = False
         self.is_importing = False
         self.cancelled_trace_upload = False
+        self.upload_success = False
         self.currentTool = None
         self.trace = None
         self.widget = QWidget()
@@ -256,7 +257,9 @@ class MainWindow(QMainWindow):
         self.skip_replay = self.widget_import.skip_replay
         self.is_importing = True
         cancelled = False
+        success = True
         self.cancelled_trace_upload = False
+        self.upload_success = False
         # TODO: Set this properly
         target_path = Path("/sdcard/devlib-target/")
         self.adb.clear_logcat()
@@ -271,7 +274,7 @@ class MainWindow(QMainWindow):
 
         if (not trace_exists_on_device) or self.widget_import.override_trace_if_existing:
             self.helper_thread = AdbThread()
-            cancelled = self.helper_thread.run_with_progress(
+            cancelled, success = self.helper_thread.run_with_progress(
                 parent=self,
                 title="Uploading trace to device...",
                 adb=self.adb,
@@ -285,8 +288,12 @@ class MainWindow(QMainWindow):
         elif trace_exists_on_device:
             logger.info(f"Skipping upload of trace file: {self.currentTrace} to device folder {target_path} because it already exists on the target device")
 
-        if cancelled:
-            self.cancelled_trace_upload = True
+        self.cancelled_trace_upload = cancelled
+        self.upload_success = success
+
+        if cancelled or not success:
+            QMessageBox.warning(self, "Import failed", "Trace upload was cancelled or failed. Returning to import.")
+            self.set_page(PageIndex.TRACE_IMPORTER)
             return
 
         self.currentTrace = target_path / os.path.basename(self.currentTrace)
@@ -372,6 +379,10 @@ class MainWindow(QMainWindow):
 
         if self.cancelled_trace_upload:
             logger.info("trace upload cancelled")
+        if not self.upload_success:
+            logger.info("Trace upload failed. Check that device has sufficient free space")
+
+        if self.cancelled_trace_upload or not self.upload_success:
             self.set_page(PageIndex.START)
             self.move_to_start_widget()
             return
