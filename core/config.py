@@ -32,7 +32,12 @@ class ConfigSettings():
 
     def create_config(self):
         # TODO add more helpful settings(debug mode, log level, user configs)
-        self.config['Paths'] = {'pat_path': '', 'gfxr_path': '', 'img_path': self.img_path, 'hwc_path': self.hwc_path}
+        self.config['Paths'] = {
+            'pat_path': '',
+            'gfxr_path': '',
+            'img_path': self.img_path,
+            'hwc_path': self.hwc_path,
+        }
 
         with open(self.config_path, 'w') as configfile:
             self.config.write(configfile)
@@ -44,13 +49,19 @@ class ConfigSettings():
         gfxr_path = self.config.get('Paths', 'gfxr_path')
         img_path = self.config.get('Paths', 'img_path')
         hwc_path = self.config.get('Paths', 'hwc_path')
+        replay_working_dir = self.config.get('Paths', 'replay_working_dir', fallback='/sdcard/devlib-target')
+        capture_root_base = self.config.get('Paths', 'capture_root_base', fallback='/data')
+        device_layer_base = self.config.get('Paths', 'device_layer_base', fallback='/data/local/debug')
 
         config_values = {
             'Paths': {
                 'pat_path': pat_path,
                 'gfxr_path': gfxr_path,
                 'img_path': img_path,
-                'hwc_path': hwc_path
+                'hwc_path': hwc_path,
+                'replay_working_dir': replay_working_dir,
+                'capture_root_base': capture_root_base,
+                'device_layer_base': device_layer_base,
             }
         }
 

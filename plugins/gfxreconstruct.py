@@ -43,11 +43,15 @@ class tracetool(object):
         }
         self.basepath = Path('artifacts/gfxreconstruct-arm')
         self.base = None
-        self.sdcard_working_dir = Path('/sdcard/devlib-target/')
-        self.capture_root_dir = Path('/data/gfxr/')
+        paths_cfg = self.config.get_config().get('Paths', {})
+        workdir = paths_cfg.get('replay_working_dir', '/sdcard/devlib-target')
+        capture_base = paths_cfg.get('capture_root_base', '/data')
+        device_layer_base = paths_cfg.get('device_layer_base', '/data/local/debug')
+        self.sdcard_working_dir = Path(workdir)
+        self.capture_root_dir = Path(capture_base) / "gfxr"
         self.capture_file_fullpath = None
         self.capture_file_name = None
-        self.device_layer_debug_root = Path("/data/local/debug/vulkan/")
+        self.device_layer_debug_root = Path(device_layer_base) / "vulkan"
 
     def uptodate(self):
         """

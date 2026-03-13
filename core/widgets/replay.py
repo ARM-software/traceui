@@ -24,7 +24,7 @@ class ReplayWorker(QObject):
     error = Signal(Exception)
 
 
-    def __init__(self, adb, process, cmd, filename, screenshot, hwc, local_dir, extra_args={}):
+    def __init__(self, adb, process, cmd, filename, screenshot, hwc, local_dir, extra_args={}, working_dir=Path("/sdcard/devlib-target")):
         super().__init__()
         self.adb = adb
         self.process = process
@@ -36,6 +36,7 @@ class ReplayWorker(QObject):
         self.local_dir = local_dir
         self.results = None
         self.extra_args = extra_args
+        self.working_dir = Path(working_dir)
 
     def stop(self):
         self._killed = True
@@ -97,7 +98,7 @@ class ReplayWorker(QObject):
         self.results = dict()
         if self.screenshot:
             dir_prefix = f"{Path(self.filename).stem}_screenshot"
-            sdcard_dir= f"/sdcard/devlib-target/{dir_prefix}"
+            sdcard_dir = str(self.working_dir / dir_prefix)
             screenshot_prefix = f"{dir_prefix}_frame_"
             self.results['screenshot_path'] = self.__check_screenshots_on_device(base_dir=sdcard_dir, grep_string=screenshot_prefix, cleanup=False)
             # TODO: leave file name intact on device. Rename locally instead
@@ -109,7 +110,7 @@ class ReplayWorker(QObject):
             self.results['screenshot_path'] = self.__check_screenshots_on_device(base_dir=sdcard_dir, grep_string=screenshot_prefix, cleanup=False)
 
         if self.hwc:
-            hwcpipe_layer_result_mask = "/sdcard/devlib-target/*_gpu_id_*_per_frame_counters.csv"
+            hwcpipe_layer_result_mask = f"{self.working_dir}/*_gpu_id_*_per_frame_counters.csv"
             if "gfxreconstruct" in self.process:
                 hwcpipe_layer_result_mask = "/sdcard/*_gpu_id_*_per_frame_counters.csv"
 
@@ -143,7 +144,7 @@ class ReplayWorker(QObject):
     def cleanup(self):
         if self.screenshot:
             dir_prefix = f'{Path(self.filename).stem}_screenshot'
-            sdcard_dir = f"/sdcard/devlib-target/{dir_prefix}"
+            sdcard_dir = str(self.working_dir / dir_prefix)
             screenshot_prefix = f'{dir_prefix}_frame_'
             self.__check_screenshots_on_device(base_dir=sdcard_dir, grep_string=screenshot_prefix, cleanup=True)
         self.finished.emit(True)
@@ -160,7 +161,7 @@ class UiReplayWidget(PageNavigation):
     frame_range_signal = Signal()
     ff_done = Signal()
 
-    def __init__(self, adb, plugins):
+    def __init__(self, adb, plugins, replay_working_dir):
         """
         Initialize the replay page
         Args:
@@ -172,6 +173,7 @@ class UiReplayWidget(PageNavigation):
         self.currentTrace = None
         self.adb = adb
         self.plugins = plugins
+        self.replay_working_dir = Path(replay_working_dir)
         self.errorsLastReplay = False
         self._replay_exception = None
         self._default_replay_label_text = "Please check device for potential infomation if the program remains stuck on this page."
@@ -188,6 +190,12 @@ class UiReplayWidget(PageNavigation):
         Set current trace
         """
         self.currentTrace = trace
+
+    def setWorkingDir(self, path):
+        """
+        Update replay working directory on device.
+        """
+        self.replay_working_dir = Path(path)
 
     def cleanup_page(self):
         """
@@ -246,7 +254,7 @@ class UiReplayWidget(PageNavigation):
 
         self._cleanup_event_loop = QEventLoop()
         self.cleanup_thread = QThread()
-        self.cleanup_Worker = ReplayWorker(self.adb, None, None, trace_used, screenshots, hwc, None)
+        self.cleanup_Worker = ReplayWorker(self.adb, None, None, trace_used, screenshots, hwc, None, working_dir=self.replay_working_dir)
         self.cleanup_Worker.moveToThread(self.cleanup_thread)
         self.cleanup_thread.started.connect(self.cleanup_Worker.cleanup)
 
@@ -278,7 +286,7 @@ class UiReplayWidget(PageNavigation):
                 "to_frame": to_frame,
                 "currentTool": self.currentTool
             }
-            self.ff_worker = ReplayWorker(self.adb, self.currentTool.replayer["name"], self.cmd, trace_used, screenshots, hwc, local_dir, extra_args)
+            self.ff_worker = ReplayWorker(self.adb, self.currentTool.replayer["name"], self.cmd, trace_used, screenshots, hwc, local_dir, extra_args, working_dir=self.replay_working_dir)
             self.ff_worker.moveToThread(self.adbThread)
             self.adbThread.started.connect(self.ff_worker.start_replay)
             #generate fast forward and verifying
@@ -305,11 +313,12 @@ class UiReplayWidget(PageNavigation):
             if self.currentTool.plugin_name == "patrace":
                 with open('tmp/replay_args.json', 'w') as outfile:
                     json.dump(data, outfile, indent=2)
-                self.adb.push('tmp/replay_args.json', '/sdcard/devlib-target/')
+                self.adb.command(["mkdir", "-p", str(self.replay_working_dir)], True)
+                self.adb.push('tmp/replay_args.json', str(self.replay_working_dir))
             logger.debug("Currently replaying the thread.")
             QApplication.processEvents()
 
-            self.adbWorker = ReplayWorker(self.adb, self.currentTool.replayer["name"], self.cmd, trace_used, screenshots, hwc, local_dir)
+            self.adbWorker = ReplayWorker(self.adb, self.currentTool.replayer["name"], self.cmd, trace_used, screenshots, hwc, local_dir, working_dir=self.replay_working_dir)
             self.adbWorker.moveToThread(self.adbThread)
             self.adbThread.started.connect(self.adbWorker.start_replay)
 

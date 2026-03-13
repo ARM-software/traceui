@@ -2,6 +2,7 @@ import subprocess
 import time
 import os
 import shutil
+from pathlib import Path
 from core.config import ConfigSettings, ConfigGfxrWindow, ConfigPatraceWindow
 
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QEventLoop
@@ -62,7 +63,7 @@ class UiTraceWidget(PageNavigation):
     loading_signal = Signal()
     returnfromloading_signal = Signal()
 
-    def __init__(self, adb, plugins):
+    def __init__(self, adb, plugins, replay_working_dir=None):
         """
         Initialize the trace page
 
@@ -76,6 +77,8 @@ class UiTraceWidget(PageNavigation):
         tool_paths = config.get('Paths')
         self.patpath = tool_paths.get('pat_path')
         self.gfxrpath = tool_paths.get('gfxr_path')
+        default_workdir = tool_paths.get('replay_working_dir', '/sdcard/devlib-target')
+        self.replay_working_dir = Path(replay_working_dir or default_workdir)
 
         self.manual_tracing = False
         self.config_box = None
@@ -101,6 +104,9 @@ class UiTraceWidget(PageNavigation):
     def cleanUpImages(self):
         if os.path.isdir("tmp/replay_imgs"):
             shutil.rmtree("tmp/replay_imgs")
+
+    def setWorkingDir(self, path):
+        self.replay_working_dir = Path(path)
 
     def cleanup_page(self):
         """
@@ -147,7 +153,7 @@ class UiTraceWidget(PageNavigation):
         """
         Set up loading page for analysing packages
         """
-        self.adb.cleanUpSDCard()
+        self.adb.cleanUpSDCard(str(self.replay_working_dir))
         self.cleanUpImages()
         self.loading_page = QWidget()
         layout = QVBoxLayout()

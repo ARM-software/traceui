@@ -497,10 +497,10 @@ class adb(object):
 
         return device
 
-    def cleanUpSDCard(self):
-        stdout, _ = self.command(['ls', "/sdcard/devlib-target"], True, errors_handled_externally=True)
+    def cleanUpSDCard(self, working_dir="/sdcard/devlib-target"):
+        stdout, _ = self.command(['ls', working_dir], True, errors_handled_externally=True)
         if stdout:
-            self.command(["rm", "-r" " /sdcard/devlib-target"], True)
+            self.command(["rm", "-r", working_dir], True)
 
 if __name__ == '__main__':
     a = adb()

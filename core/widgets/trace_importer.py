@@ -32,6 +32,7 @@ class UiTraceImportWidget(PageNavigation):
         super().__init__()
         self.adb = adb
         self.trace = trace
+        self.sdcard_working_dir = None
 
         self.device_window = None
         self.plugins = plugins
