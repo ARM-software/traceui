@@ -108,7 +108,8 @@ class UiTraceWidget(PageNavigation):
         # Back button
         if self.adb.device:
             self.applist = self.adb.apps()
-            print(self.applist)
+            applist = list(self.applist)
+            logger.debug(f'Installed Apps: {[app.get("name") for app in applist]}')
         else:
             self.applist = []
 
@@ -445,8 +446,19 @@ class UiTraceWidget(PageNavigation):
             self.currentTrace = remote_path_to_trace
             _, ls_error = self.adb.command(['ls', remote_path_to_trace], run_with_sudo=False)
             if ls_error:
-                logger.warning(f"No output trace file found at: {remote_path_to_trace}. Tracing probably failed.")
-                self._handleFailed()
+                error_lower = ls_error.lower()
+                if "permission denied" in error_lower:
+                    logger.warning(f"Permission denied when accessing trace at: {remote_path_to_trace}")
+                    extra_lines = [
+                        "Trace created but failed to access the trace file on the device.",
+                        f"Path: {remote_path_to_trace}",
+                        "\n"
+                        "Suggestions: Ensure the trace directory is readable or try fetching the trace manually"
+                    ]
+                    self._handleFailed(extra_lines=extra_lines)
+                else:
+                    logger.warning(f"No output trace file found at: {remote_path_to_trace}. Tracing probably failed. Error: {ls_error}")
+                    self._handleFailed(extra_lines=[f"Could not find trace file at: {remote_path_to_trace}"])
                 return
             else:
                 logger.info(f"Created trace file at: {remote_path_to_trace}")
@@ -505,19 +517,26 @@ class UiTraceWidget(PageNavigation):
         else:
             self._handleFailed()
 
-    def _handleFailed(self):
+    def _handleFailed(self, extra_lines=[]):
         """
         Report error to user and returns to the app selection page
+
+        Args:
+            extra_lines (list[str], optional): Additional lines to show in the warning dialog.
         """
         logger.info(f"Reset device after tracing with '{self.currentTool}'")
         self.plugins[self.currentTool].trace_reset_device()
-        logger.warning(f"Generation of trace file was not successful, failed to start tracing process.")
-        box_lines = ["WARNING: Tracing was not successful. Try a different tracing tool"]
+        logger.warning(f"Errors encounterd in tracing process")
+        box_lines = []
+        if extra_lines:
+            box_lines.extend(extra_lines)
+            box_lines += "\n"
 
         # Check for some basic errors
         if self.currentAppStarted is False:
             box_lines += [f"{self.currentApp} was not started."]
-        else:
+        elif "failed to access" not in extra_lines[0]:
+            box_lines += ["Suggestions: Try a different tracing tool"]
             box_lines += self.plugins[self.currentTool].parse_logcat(mode="trace", app=self.currentApp)
         msg = QMessageBox()
         msg.setText("\n".join(box_lines))
