@@ -126,7 +126,7 @@ class UiTraceWidget(PageNavigation):
         header.setAlignment(Qt.AlignCenter)
         start_button = QPushButton("Next")
         start_button.clicked.connect(self.apkAnalyses_toolMatching)
-        self.apk_analysis = QCheckBox("Skip extracting Engine/API info from apk")
+        self.apk_analysis = QCheckBox("Extract Engine/API info from apk")
         self.setupAppLayouts(back_button, header, start_button)
         self.nestedStack.setCurrentIndex(PAGE_APP_SELECTION)
 
@@ -169,7 +169,7 @@ class UiTraceWidget(PageNavigation):
 
     def apkAnalyses_toolMatching(self):
         # Back button
-        if not self.apk_analysis.isChecked():
+        if self.apk_analysis.isChecked():
             self.setupLoading()
             self.nestedStack.setCurrentIndex(PAGE_ANALYSING_APK)
             QApplication.processEvents()

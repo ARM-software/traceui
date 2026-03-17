@@ -3,6 +3,10 @@
 # Try to never change this file, as this would break it as it updates itself!
 #
 
+# Run from the script directory. Allows running from any directory.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd -- "$SCRIPT_DIR"
+
 if [[ $(git diff --quiet) ]]; then
   echo "Differences in checked out code - not running update!"
 else
@@ -11,7 +15,7 @@ else
   echo "... update done."
 fi
 
-. ./update-artifacts.sh
+. "$SCRIPT_DIR/update-artifacts.sh"
 
 LOG_LEVEL=""
 ARGS=()
@@ -36,4 +40,4 @@ if [[ -n "$LOG_LEVEL" ]]; then
   export TRACEUI_LOG_LEVEL="$LOG_LEVEL"
 fi
 
-python traceui.py "${ARGS[@]}"
+python "$SCRIPT_DIR/traceui.py" "${ARGS[@]}"

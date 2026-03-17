@@ -14,14 +14,14 @@ Requires python 3.6 or newer
 
 If running outside a virtual python environment:
 ```
-sudo -H pip install pandas pyside6==6.2.4
+sudo -H pip install pandas pyside6==6.7.0
 git clone ...
 cd traceui
 ```
 
 If using a virtual environment:
 ```
-pip install pandas pyside6==6.2.4
+pip install pandas pyside6==6.7.0
 git clone ...
 cd traceui
 ```
