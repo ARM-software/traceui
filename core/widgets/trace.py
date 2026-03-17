@@ -5,7 +5,7 @@ import shutil
 from core.config import ConfigSettings, ConfigGfxrWindow, ConfigPatraceWindow
 
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QEventLoop
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QGridLayout, QGroupBox, QSizePolicy, QStackedWidget, QMessageBox, QScrollArea, QLineEdit, QCheckBox
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QGridLayout, QGroupBox, QSizePolicy, QStackedWidget, QMessageBox, QScrollArea, QLineEdit, QCheckBox, QComboBox, QTabWidget
 from core.page_navigation import PageNavigation, PageIndex
 from core.adb_thread import AdbThread
 from adblib import print_codes
@@ -77,6 +77,9 @@ class UiTraceWidget(PageNavigation):
         self.patpath = tool_paths.get('pat_path')
         self.gfxrpath = tool_paths.get('gfxr_path')
 
+        self.manual_tracing = False
+        self.config_box = None
+
         self.adb = adb
         self.trace_result = None
         self.currentApp = None
@@ -84,6 +87,16 @@ class UiTraceWidget(PageNavigation):
         self.lastTrace = None
         self.plugins = plugins
         self.currentTool = None
+
+    def setManualTracing(self, state):
+        """
+        Callback and logic for toggling manual tracing
+        """
+        if state == Qt.Unchecked:
+            self.manual_tracing = False
+        elif state == Qt.Checked:
+            self.manual_tracing = True
+
 
     def cleanUpImages(self):
         if os.path.isdir("tmp/replay_imgs"):
@@ -212,8 +225,8 @@ class UiTraceWidget(PageNavigation):
         self.trace_info_label.setAlignment(Qt.AlignCenter)
         self.widgetStyleSheet(self.trace_info_label, color="#f0f0f0", font_size="16px")
         button_group = QGroupBox()
-        button_group.setFixedHeight(300)
-        self.tool_layout = QHBoxLayout()
+        button_group.setFixedHeight(700)
+        self.tool_layout = QGridLayout()
         h_layout = QHBoxLayout()
         h_layout.addStretch()
         h_layout.addWidget(start_button)
@@ -342,6 +355,10 @@ class UiTraceWidget(PageNavigation):
             # Set up device and start prosess
             self.plugins[self.currentTool].trace_setup_device(self.currentApp)
             logger.debug(f"Device was set up for tracing '{self.currentApp}' using '{self.currentTool}")
+            if self.currentTool == "gfxreconstruct" and self.manual_tracing:
+                # set prop "capture_android_trigger" based on tickbox
+                self.adb.setprop('debug.gfxr.capture_android_trigger', 'false')
+            logger.debug(f"Manual trace start set to {self.manual_tracing}")
 
             # Page #1: App start / tracing
             self.app_start_widget = QWidget()
@@ -370,6 +387,11 @@ class UiTraceWidget(PageNavigation):
             stop_tracing_button = QPushButton("Stop tracing")
             stop_tracing_button.clicked.connect(self.endTrace)
             stop_tracing_button.setObjectName("end trace")
+            if self.manual_tracing and self.currentTool == "gfxreconstruct":
+                start_tracing_button = QPushButton("Start tracing")
+                start_tracing_button.clicked.connect(self.beginTrace)
+                start_tracing_button.setObjectName("begin trace")
+                self.app_start_layout.addWidget(start_tracing_button)
             self.app_start_layout.addWidget(stop_tracing_button)
 
             # Set widget layout and add to nested stack
@@ -388,7 +410,7 @@ class UiTraceWidget(PageNavigation):
             self.adbWorker.finished.connect(self.adbThread.quit)
             self.adbWorker.finished.connect(self.adbWorker.deleteLater)
             self.adbThread.finished.connect(self.adbThread.deleteLater)
-           # QTimer.singleShot(0, self.adbThread.start)
+            # QTimer.singleShot(0, self.adbThread.start)
             self.adbThread.start()
 
         else:
@@ -426,9 +448,17 @@ class UiTraceWidget(PageNavigation):
         label = self.app_start_widget.findChild(QLabel, "status")
         label.clear()
         end_trace_button = self.app_start_widget.findChild(QPushButton, "end trace")
+        begin_trace_button = self.app_start_widget.findChild(QPushButton, "begin trace")
         if end_trace_button.isVisible():
             end_trace_button.hide()
+        if self.currentTool == "gfxreconstruct" and self.manual_tracing:
+            begin_trace_button.hide()
 
+    def beginTrace(self):
+        """
+        Start the tracing manually
+        """
+        self.adb.setprop('debug.gfxrecon.capture_android_trigger', 'true')
 
     def endTrace(self):
         """
@@ -569,6 +599,30 @@ class UiTraceWidget(PageNavigation):
         self.trace_info_label.setText(
             f"Detected Engine: {engine or 'Unknown'}\nUsed APIs: {apis_text}\n\n Select Appropriate trace tool. \n Try gfxreconstruct first if available"
         )
+
+        tool_combo_box = QComboBox()
+        tracer_label = QLabel("Tracer: ")
+        tracer_label.setBuddy(tool_combo_box)
+        tracer_label.setAlignment(Qt.AlignRight)
+        self.tool_layout.addWidget(tracer_label, 0, 0)
+        self.tool_layout.addWidget(tool_combo_box, 0, 1)
+
+        self.config_box = QTabWidget()
+        # GFXR config options
+        self.gfxr_option_widget = QGroupBox("GFXR Config")
+        check_box_manual_tracing = QCheckBox("Enable manual trace start")
+        check_box_manual_tracing.setChecked(False)
+        check_box_manual_tracing.checkStateChanged.connect(self.setManualTracing)
+        gfxr_grid = QGridLayout()
+        gfxr_grid.addWidget(check_box_manual_tracing, 0, 0)
+        self.gfxr_option_widget.setLayout(gfxr_grid)
+        #PATRACE config options
+        self.patrace_option_widget = QGroupBox("PaTrace Config")
+
+        tab_dict = {}
+        tab_dict["patrace"] = self.patrace_option_widget
+        tab_dict["gfxreconstruct"] = self.gfxr_option_widget
+
         trace_tools = ["patrace", "gfxreconstruct"]
         for key, value in self.plugins.items():
             if value.plugin_name not in trace_tools:
@@ -580,24 +634,41 @@ class UiTraceWidget(PageNavigation):
                 show_tool = True
             elif value.plugin_name == "patrace" and self.trace_result["uses_gles"]:
                 show_tool = True
-            elif value.plugin_name in ["gfxreconstruct"] and self.trace_result["uses_vulkan"]:
+            elif value.plugin_name == "gfxreconstruct" and self.trace_result["uses_vulkan"]:
                 show_tool = True
                 preselect_gfxr = True
 
             if show_tool:
-                tool_button = QPushButton(value.plugin_name)
-                tool_button.setCheckable(True)
+                new_tab_idx = self.config_box.addTab(tab_dict[value.plugin_name], value.plugin_name)
+                tool_combo_box.addItem(value.plugin_name)
                 if preselect_gfxr:
-                    tool_button.setChecked(True)
+                    self.config_box.setCurrentIndex(new_tab_idx)
                     self.setCurrentTool(value.plugin_name)
-                tool_button.setAutoExclusive(True)
-                tool_button.clicked.connect(lambda *, t=value.plugin_name: self.setCurrentTool(t))
-                tool_button.setFixedWidth(200)
-                tool_button.setStyleSheet("font-size: 18px;")
-                self.tool_layout.addStretch()
-                self.tool_layout.addWidget(tool_button)
+        
+        for i in range(self.config_box.count()):
+            if self.config_box.tabText(i) == tool_combo_box.currentText():
+                self.config_box.setCurrentIndex(i)
+                logger.debug(f"Combo selection: {tool_combo_box.currentText}")
+                break
 
-        self.tool_layout.addStretch()
+        tool_combo_box.currentTextChanged.connect(self.changeToolConfigPage)
+        # self.config_box.currentChanged.connect()
+        self.config_box.tabBar().hide()
+        self.tool_layout.addWidget(self.config_box, 1, 0, 1, 10)
+
+    def changeToolConfigPage(self, tool):
+        """
+        Set the tracing tool to the selected one &
+        change the settings page that is being displayed
+        """
+        self.setCurrentTool(tool)
+        for i in range(self.config_box.count()):
+            if self.config_box.tabText(i) == tool:
+                self.config_box.setCurrentIndex(i)
+                break
+        logger.debug(f"Seleceted tool: {self.currentTool}")
+        return
+
 
     def startReplay(self):
         """
