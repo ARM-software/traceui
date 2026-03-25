@@ -10,6 +10,7 @@ from core.logger_config import setup_logger
 
 logger = setup_logger("patrace")
 
+
 class tracetool(object):
     def __init__(self, adb):
         self.adb = adb
@@ -19,7 +20,9 @@ class tracetool(object):
         self.full_name = 'Official release of patrace'
         self.variant = 'scratch'
         self.dirname = 'android'
-        self.tracelib = {'arm64-v8a': 'gleslayer/libGLES_layer_arm64.so', 'armeabi-v7a': 'gleslayer/libGLES_layer_arm.so'}
+        self.tracelib = {
+            'arm64-v8a': 'gleslayer/libGLES_layer_arm64.so',
+            'armeabi-v7a': 'gleslayer/libGLES_layer_arm.so'}
         self.replayer = {
             'script': Path(''),
             'apk': Path('eglretrace/eglretrace-release.apk'),
@@ -51,8 +54,10 @@ class tracetool(object):
         self.capture_app_dir = self.capture_root_dir / app
         self.adb.command(['mkdir', '-p', self.capture_app_dir], True)
         self.adb.command(['chmod', 'o+rw', self.capture_app_dir], True)
-        self.adb.command(['chcon', 'u:object_r:app_data_file:s0:c512,c768', self.capture_app_dir], True)
-        self.capture_file_fullpath = self.capture_root_dir / app / (app + ".1.pat")
+        self.adb.command(
+            ['chcon', 'u:object_r:app_data_file:s0:c512,c768', self.capture_app_dir], True)
+        self.capture_file_fullpath = self.capture_root_dir / \
+            app / (app + ".1.pat")
         self.adb.delete_file(self.capture_file_fullpath)
 
         # Retrieve the app "layer path" to put the capture layer in
@@ -62,9 +67,11 @@ class tracetool(object):
         if len(adb_config_abi.split(",")) == 0:
             layer_path = os.getcwd() / self.basepath / self.dirname / adb_config_abi
         elif "arm64-v8a" in adb_config_abi:
-            layer_path = os.getcwd() / self.basepath / self.dirname / self.tracelib["arm64-v8a"]
+            layer_path = os.getcwd(
+            ) / self.basepath / self.dirname / self.tracelib["arm64-v8a"]
         else:
-            layer_path = os.getcwd() / self.basepath / self.dirname / adb_config_abi.split(',')[0]
+            layer_path = os.getcwd(
+            ) / self.basepath / self.dirname / adb_config_abi.split(',')[0]
         # Ensure layer exists in local path
         if not layer_path.exists():
             logger.critical(f"Trace layer not found on local device")
@@ -72,7 +79,8 @@ class tracetool(object):
 
         # Put the layer on device
         self.adb.command(['mkdir', '-p', self.device_layer_root], True)
-        logger.debug(f"Pushing layer: {layer_path} to {self.device_layer_root}")
+        logger.debug(
+            f"Pushing layer: {layer_path} to {self.device_layer_root}")
         self.adb.push(str(layer_path), str(self.device_layer_root))
         if not self.adb.command(['ls', self.device_layer_root], True):
             raise Exception(f"Layer not found in {self.device_layer_root}")
@@ -81,24 +89,27 @@ class tracetool(object):
 
         # setup patrace
         self.adb.command(['setenforce', '0'], True)
-        self.adb.command(['settings', 'put', 'global', 'enable_gpu_debug_layers', '1'])
+        self.adb.command(['settings', 'put', 'global',
+                         'enable_gpu_debug_layers', '1'])
         self.adb.command(['settings', 'put', 'global', 'gpu_debug_app', app])
-        self.adb.command(['settings', 'put', 'global', 'gpu_debug_layers_gles', self.layer_filename])
+        self.adb.command(['settings', 'put', 'global',
+                         'gpu_debug_layers_gles', self.layer_filename])
 
     def trace_reset_device(self):
         """
         Resets the parameters set by tracing/replaying to their original value.
         """
-        self.adb.command(['settings', 'delete', 'global', 'enable_gpu_debug_layers'])
+        self.adb.command(['settings', 'delete', 'global',
+                          'enable_gpu_debug_layers'])
         self.adb.command(['settings', 'delete', 'global', 'gpu_debug_app'])
-        self.adb.command(['settings', 'delete', 'global', 'gpu_debug_layers_gles'])
+        self.adb.command(
+            ['settings', 'delete', 'global', 'gpu_debug_layers_gles'])
 
         # Remove all custom settings
         self.adb.intermediate_cleanup()
 
     def trace_parse_logcat(self, app):
         return []
-
 
     def trace_setup_check(self, app):
         """
@@ -112,15 +123,16 @@ class tracetool(object):
         """
         result, _ = self.adb.command([f"ps -A | grep {app}"])
         device_layer_path = self.device_layer_root / self.layer_filename
-        layer_found, _ = self.adb.command([f"if [ -f {device_layer_path} ]; then echo true; else echo false; fi"])
-        layers_enabled, _ = self.adb.command(['settings', 'get', 'global', 'enable_gpu_debug_layers'])
-        app_in_debug_prop, _ = self.adb.command(['settings', 'get', 'global', 'gpu_debug_app'])
-        tracing_layers_enabled, _ = self.adb.command(['settings', 'get', 'global', 'gpu_debug_layers_gles'])
-        if ((app in result) and
-            layer_found == 'true' and
-            layers_enabled == '1' and
-            app_in_debug_prop == app and
-                self.layer_filename in tracing_layers_enabled):
+        layer_found, _ = self.adb.command(
+            [f"if [ -f {device_layer_path} ]; then echo true; else echo false; fi"])
+        layers_enabled, _ = self.adb.command(
+            ['settings', 'get', 'global', 'enable_gpu_debug_layers'])
+        app_in_debug_prop, _ = self.adb.command(
+            ['settings', 'get', 'global', 'gpu_debug_app'])
+        tracing_layers_enabled, _ = self.adb.command(
+            ['settings', 'get', 'global', 'gpu_debug_layers_gles'])
+        if (layer_found == 'true' and layers_enabled == '1' and app_in_debug_prop ==
+                app and self.layer_filename in tracing_layers_enabled):
             logger.debug(f"Attempted tracing for:  '{app}'")
             return True
 
@@ -155,11 +167,16 @@ class tracetool(object):
             device (str): Device name, if None adblib device will be used
         """
         apk_path = self.basepath / self.dirname / self.replayer['apk']
-        self.adb.install(apk_path, device)  # by only reinstalling the replayer we don't have to get permissions manually again
+        # by only reinstalling the replayer we don't have to get permissions
+        # manually again
+        self.adb.install(apk_path, device)
         self.adb.manage_app_permissions(self.replayer['name'], device)
         # clear the logcat after setup
 
-    def replay_start(self, file, screenshot=False, hwc=False, repeat=1, device=None, extra_args=[], from_frame=None, to_frame="", interval=10):
+    def replay_start(
+            self, file, screenshot=False, hwc=False, repeat=1, device=None,
+            extra_args=[],
+            from_frame=None, to_frame="", interval=10):
         json_data = {}
         json_data["file"] = str(file)
         if from_frame is None:
@@ -167,13 +184,15 @@ class tracetool(object):
         if to_frame:
             json_data["frames"] = f'1-{to_frame+5}'
 
-        # TODO make cleanup functions more efficient and run after frame selection/fastforwarding
+        # TODO make cleanup functions more efficient and run after frame
+        # selection/fastforwarding
         if hwc:
             hwcpipe_layer_result_mask = self.sdcard_working_dir / "*_gpu_id_*_per_frame_counters.csv"
             # Delete existing hwc data as this can lead to dangerous mixups on replay failure
             # TODO: Remove this when we properly detect success/failure on
             # replay
-            logger.warning(f"Removing any old HWCPipe results to avoid mixups. We should stop doing this when replay plugins detect failures in a robust manner.")
+            logger.warning(
+                f"Removing any old HWCPipe results to avoid mixups. We should stop doing this when replay plugins detect failures in a robust manner.")
             self.adb.command(
                 ['rm', hwcpipe_layer_result_mask],
                 True, None, True)
@@ -194,8 +213,10 @@ class tracetool(object):
                 json_data["snapshotCallset"] = f"frame/*/{interval}"
             elif screenshot == "all":
                 json_data["snapshotCallset"] = "frame/*/1"
-            if screenshot == "selecting_frames" and isinstance(from_frame, list):
-                json_data["snapshotCallset"] = ",".join([f"frame/{f}/1" for f in from_frame])
+            if screenshot == "selecting_frames" and isinstance(
+                    from_frame, list):
+                json_data["snapshotCallset"] = ",".join(
+                    [f"frame/{f}/1" for f in from_frame])
 
         if repeat != 1:
             assert repeat > 1, 'Repeate cannot be less than one'
@@ -246,8 +267,10 @@ class tracetool(object):
                 err_lines.append(line)
 
         if not found_app:
-            logger.warning(f"Found no mention of the target app: {app} in the logcat output, app may not have been started.")
-            err_lines.append(f"WARNING: Found no mention of the target app: {app} in the logcat output, app may not have been started.\n")
+            logger.warning(
+                f"Found no mention of the target app: {app} in the logcat output, app may not have been started.")
+            err_lines.append(
+                f"WARNING: Found no mention of the target app: {app} in the logcat output, app may not have been started.\n")
 
         return err_lines
 
@@ -257,4 +280,6 @@ if __name__ == '__main__':
     g = tracetool(a)
     print('Up to date: %s' % 'True' if g.uptodate() else 'False (installing)')
     if not g.uptodate():
-        print('Up to date: %s' % 'True (success)' if g.uptodate() else 'False (failed)')
+        print(
+            'Up to date: %s' %
+            'True (success)' if g.uptodate() else 'False (failed)')

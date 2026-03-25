@@ -202,7 +202,7 @@ class UiTraceWidget(PageNavigation):
         back_button.clicked.connect(self.go_to_app_selection)
         back_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         # Start tracing button
-        start_button = QPushButton("START")
+        start_button = QPushButton("Setup Tracer")
         start_button.setFixedWidth(200)
         self.widgetStyleSheet(start_button, color="limegreen", font_size="16px", selector="QPushButton")
         start_button.clicked.connect(self.appstart)
