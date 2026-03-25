@@ -524,6 +524,7 @@ class UiTraceWidget(PageNavigation):
         Args:
             extra_lines (list[str], optional): Additional lines to show in the warning dialog.
         """
+        self.adb.command(["am", "force-stop", self.currentApp], run_with_sudo=True)
         logger.info(f"Reset device after tracing with '{self.currentTool}'")
         self.plugins[self.currentTool].trace_reset_device()
         logger.warning(f"Errors encounterd in tracing process")
@@ -535,6 +536,9 @@ class UiTraceWidget(PageNavigation):
         # Check for some basic errors
         if self.currentAppStarted is False:
             box_lines += [f"{self.currentApp} was not started."]
+        if not extra_lines:
+            box_lines += ["Tracing setup failed"]
+            box_lines += ["Suggestions: Tracing on unrooted device is currently not supported"]
         elif "failed to access" not in extra_lines[0]:
             box_lines += ["Suggestions: Try a different tracing tool"]
             box_lines += self.plugins[self.currentTool].parse_logcat(mode="trace", app=self.currentApp)
