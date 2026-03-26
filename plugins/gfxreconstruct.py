@@ -3,6 +3,7 @@
 import os
 import subprocess
 import time
+import json
 from pathlib import Path
 import hashlib
 import adblib
@@ -21,6 +22,36 @@ logger = setup_logger("gfxreconstruct")
 
 
 class tracetool(object):
+    TRACE_SETUP_CONFIG_SECTION = "GFXR"
+    TRACE_SETUP_CONFIG_KEY = "trace_setup_setprops"
+    TRACE_SETUP_SETPROPS_DEFAULTS = [
+        {
+            "prop": "debug.gfxrecon.page_guard_align_buffer_sizes",
+            "value": "true",
+            "enabled": True,
+            "label": "Align buffer sizes with page-guard boundaries",
+        },
+        {
+            "prop": "debug.gfxrecon.page_guard_persistent_memory",
+            "value": "true",
+            "enabled": True,
+            "label": "Enable page-guard for persistent memory",
+        },
+        {
+            "prop": "debug.gfxrecon.capture_file_timestamp",
+            "value": "false",
+            "enabled": True,
+            "label": "Disable timestamp suffix in capture filename",
+        },
+        {
+            "prop": "debug.gfxrecon.capture_frames",
+            "value": "",
+            "enabled": True,
+            "ui_type": "text",
+            "label": "Capture all frames (empty frame filter)",
+        },
+    ]
+
     def __init__(self, adb):
         self.adb = adb
         self.config = ConfigSettings()
@@ -52,6 +83,186 @@ class tracetool(object):
         self.capture_file_fullpath = None
         self.capture_file_name = None
         self.device_layer_debug_root = Path(device_layer_base) / "vulkan"
+        self.trace_setup_setprops = [dict(item) for item in self.TRACE_SETUP_SETPROPS_DEFAULTS]
+        self.trace_setup_custom_setprops = []
+        self._load_trace_setup_config()
+
+    def get_trace_setup_setprops(self):
+        """
+        Return default configurable setprop entries used in trace_setup_device.
+        """
+        return [dict(item) for item in self.trace_setup_setprops]
+
+    def get_trace_setup_custom_setprops(self):
+        """
+        Return custom setprop entries used in trace_setup_device.
+        """
+        return [dict(item) for item in self.trace_setup_custom_setprops]
+
+    def add_trace_setup_custom_setprop(self, prop, value):
+        """
+        Add or update a custom setprop entry used in trace setup.
+        """
+        prop = str(prop).strip()
+        value = str(value).strip()
+        if not prop:
+            raise ValueError("Setprop name cannot be empty.")
+
+        existing_item = self._find_trace_setup_setprop(prop)
+        if existing_item:
+            existing_item["value"] = value
+            existing_item["enabled"] = True
+            self._save_trace_setup_config()
+            return False
+
+        self.trace_setup_custom_setprops.append({
+            "prop": prop,
+            "value": value,
+            "enabled": True,
+            "custom": True,
+            "label": prop,
+            "ui_type": "text",
+        })
+        self._save_trace_setup_config()
+        return True
+
+    def remove_trace_setup_custom_setprop(self, prop):
+        """
+        Remove one custom setprop by property name.
+        """
+        prop = str(prop).strip()
+        for idx, item in enumerate(self.trace_setup_custom_setprops):
+            if item.get("prop") == prop:
+                del self.trace_setup_custom_setprops[idx]
+                self._save_trace_setup_config()
+                return True
+        return False
+
+    def clear_trace_setup_custom_setprops(self):
+        """
+        Remove all custom setprops.
+        """
+        self.trace_setup_custom_setprops = []
+        self._save_trace_setup_config()
+
+    def reset_trace_setup_setprops_to_defaults(self):
+        """
+        Reset all trace setup setprops to defaults and clear custom entries.
+        """
+        self.trace_setup_setprops = [dict(item) for item in self.TRACE_SETUP_SETPROPS_DEFAULTS]
+        self.trace_setup_custom_setprops = []
+        self._save_trace_setup_config()
+
+    def set_trace_setup_setprop_enabled(self, prop, enabled):
+        """
+        Enable/disable a specific setprop in trace setup.
+        """
+        item = self._find_trace_setup_setprop(prop)
+        if item:
+            item["enabled"] = bool(enabled)
+            self._save_trace_setup_config()
+            return
+        logger.warning(f"Unknown gfxreconstruct trace setprop option: {prop}")
+
+    def set_trace_setup_setprop_value(self, prop, value):
+        """
+        Update the value of a specific setprop in trace setup.
+        """
+        item = self._find_trace_setup_setprop(prop)
+        if item:
+            item["value"] = value
+            self._save_trace_setup_config()
+            return
+        logger.warning(f"Unknown gfxreconstruct trace setprop value option: {prop}")
+
+    def _is_trace_setup_setprop_enabled(self, prop):
+        item = self._find_trace_setup_setprop(prop)
+        if item:
+            return item.get("enabled", True)
+        return False
+
+    def _iter_trace_setup_setprops(self):
+        for item in self.trace_setup_setprops:
+            yield item
+        for item in self.trace_setup_custom_setprops:
+            yield item
+
+    def _find_trace_setup_setprop(self, prop):
+        for item in self._iter_trace_setup_setprops():
+            if item["prop"] == prop:
+                return item
+        return None
+
+    def _load_trace_setup_config(self):
+        raw_config = self.config.get_value(
+            self.TRACE_SETUP_CONFIG_SECTION,
+            self.TRACE_SETUP_CONFIG_KEY,
+            fallback=""
+        )
+        if not raw_config:
+            return
+        try:
+            persisted = json.loads(raw_config)
+        except Exception as exc:
+            logger.warning(f"Failed to parse persisted GFXR setprops config: {exc}")
+            return
+
+        default_overrides = persisted.get("defaults", {})
+        for item in self.trace_setup_setprops:
+            override = default_overrides.get(item["prop"])
+            if not isinstance(override, dict):
+                continue
+            if "enabled" in override:
+                item["enabled"] = bool(override["enabled"])
+            if "value" in override:
+                item["value"] = str(override["value"])
+
+        custom_items = persisted.get("custom", [])
+        if not isinstance(custom_items, list):
+            custom_items = []
+        for custom_item in custom_items:
+            if not isinstance(custom_item, dict):
+                continue
+            prop = str(custom_item.get("prop", "")).strip()
+            if not prop:
+                continue
+            value = str(custom_item.get("value", "")).strip()
+            enabled = bool(custom_item.get("enabled", True))
+            if self._find_trace_setup_setprop(prop):
+                # If persisted custom collides with defaults, treat it as an override.
+                self.set_trace_setup_setprop_value(prop, value)
+                self.set_trace_setup_setprop_enabled(prop, enabled)
+                continue
+            self.trace_setup_custom_setprops.append({
+                "prop": prop,
+                "value": value,
+                "enabled": enabled,
+                "custom": True,
+                "label": prop,
+                "ui_type": "text",
+            })
+
+    def _save_trace_setup_config(self):
+        config_payload = {
+            "defaults": {},
+            "custom": [],
+        }
+        for item in self.trace_setup_setprops:
+            config_payload["defaults"][item["prop"]] = {
+                "enabled": bool(item.get("enabled", True)),
+                "value": str(item.get("value", "")),
+            }
+        for item in self.trace_setup_custom_setprops:
+            config_payload["custom"].append({
+                "prop": item.get("prop", ""),
+                "value": str(item.get("value", "")),
+                "enabled": bool(item.get("enabled", True)),
+            })
+        self.config.update_config(
+            self.TRACE_SETUP_CONFIG_SECTION,
+            self.TRACE_SETUP_CONFIG_KEY,
+            json.dumps(config_payload, separators=(",", ":"))
+        )
 
     def uptodate(self):
         """
@@ -89,12 +300,10 @@ class tracetool(object):
         self.adb.command(
             ['settings', 'put', 'global', 'gpu_debug_layers',
              'VK_LAYER_LUNARG_gfxreconstruct'])
-        self.adb.setprop(
-            'debug.gfxrecon.page_guard_align_buffer_sizes',
-            'true')
-        self.adb.setprop('debug.gfxrecon.page_guard_persistent_memory', 'true')
-        self.adb.setprop('debug.gfxrecon.capture_file_timestamp', 'false')
-        self.adb.setprop('debug.gfxrecon.capture_frames', "''")
+        for setprop_item in self._iter_trace_setup_setprops():
+            if not setprop_item.get("enabled", True):
+                continue
+            self.adb.setprop(setprop_item["prop"], setprop_item["value"])
         # TODO: Update the capture_file_name when capture_frames is set
 
         self.adb.command(['mkdir', '-p', self.capture_root_dir], True)
@@ -178,12 +387,18 @@ class tracetool(object):
             ['settings', 'get', 'global', 'gpu_debug_app'])
         tracing_layers_enabled, _ = self.adb.command(
             ['settings', 'get', 'global', 'gpu_debug_layers'])
-        align_buffer_sizes_set = self.adb.getprop(
-            'debug.gfxrecon.page_guard_align_buffer_sizes')
+        align_buffer_sizes_enabled = self._is_trace_setup_setprop_enabled(
+            'debug.gfxrecon.page_guard_align_buffer_sizes'
+        )
+        align_buffer_sizes_ok = True
+        if align_buffer_sizes_enabled:
+            align_buffer_sizes_ok = (
+                self.adb.getprop('debug.gfxrecon.page_guard_align_buffer_sizes') == 'true'
+            )
         if (layers_enabled == '1' and
             app_in_debug_prop == app and
             'VK_LAYER_LUNARG_gfxreconstruct' in tracing_layers_enabled and
-                align_buffer_sizes_set == 'true'):
+                align_buffer_sizes_ok):
             return True
 
         return False
@@ -375,6 +590,15 @@ class tracetool(object):
                 logger.warning(
                     f"Extension missing on replay device, replay may fail: {line}")
                 extension_missing_lines.append(line)
+
+            if "File did not contain any frames" in line:
+                frame_error = (
+                    "ERROR: gfxreconstruct reported no frames in the trace file "
+                    "(\"File did not contain any frames\")."
+                )
+                if frame_error not in err_lines:
+                    logger.error(f"Found no-frame trace error in logcat: {line}")
+                    err_lines.append(frame_error)
 
             if "F gfxrecon: API call at index:" in line:
                 if "VK_ERROR_EXTENSION_NOT_PRESENT" in line:

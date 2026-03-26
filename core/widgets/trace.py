@@ -6,7 +6,7 @@ from pathlib import Path
 from core.config import ConfigSettings, ConfigGfxrWindow, ConfigPatraceWindow
 
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QEventLoop
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QGridLayout, QGroupBox, QSizePolicy, QStackedWidget, QMessageBox, QScrollArea, QLineEdit, QCheckBox, QComboBox, QTabWidget
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QGridLayout, QGroupBox, QSizePolicy, QStackedWidget, QMessageBox, QScrollArea, QLineEdit, QCheckBox, QComboBox, QTabWidget, QDialog, QFormLayout
 from core.page_navigation import PageNavigation, PageIndex
 from core.adb_thread import AdbThread
 from adblib import print_codes
@@ -82,6 +82,12 @@ class UiTraceWidget(PageNavigation):
 
         self.manual_tracing = False
         self.config_box = None
+        self.gfxr_setprop_checkboxes = {}
+        self.gfxr_setprop_inputs = {}
+        self.gfxr_custom_setprop_inputs = {}
+        self.gfxr_custom_setprop_remove_buttons = {}
+        self.gfxr_grid = None
+        self.add_custom_setprop_button = None
 
         self.adb = adb
         self.trace_result = None
@@ -99,6 +105,222 @@ class UiTraceWidget(PageNavigation):
             self.manual_tracing = False
         elif state == Qt.Checked:
             self.manual_tracing = True
+
+    def setGfxrTraceSetpropEnabled(self, prop, state):
+        """
+        Toggle one gfxreconstruct trace setup property.
+        """
+        gfxr_plugin = self.plugins.get("gfxreconstruct")
+        if not gfxr_plugin or not hasattr(gfxr_plugin, "set_trace_setup_setprop_enabled"):
+            return
+        gfxr_plugin.set_trace_setup_setprop_enabled(prop, state == Qt.Checked)
+
+    def setGfxrTraceSetpropValue(self, prop, value):
+        """
+        Update one gfxreconstruct trace setup property value.
+        """
+        gfxr_plugin = self.plugins.get("gfxreconstruct")
+        if not gfxr_plugin or not hasattr(gfxr_plugin, "set_trace_setup_setprop_value"):
+            return
+        gfxr_plugin.set_trace_setup_setprop_value(prop, value.strip())
+
+    def _clearLayout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                self._clearLayout(item.layout())
+
+    def openAddGfxrSetpropDialog(self):
+        """
+        Open a dialog for adding a custom gfxreconstruct setprop.
+        """
+        gfxr_plugin = self.plugins.get("gfxreconstruct")
+        if not gfxr_plugin or not hasattr(gfxr_plugin, "add_trace_setup_custom_setprop"):
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add custom setprop")
+        dialog.setMinimumWidth(640)
+
+        prop_input = QLineEdit()
+        prop_input.setPlaceholderText("debug.gfxrecon.some_property")
+        value_input = QLineEdit()
+        value_input.setPlaceholderText("Value (leave empty for empty string)")
+
+        form = QFormLayout()
+        form.addRow("Property", prop_input)
+        form.addRow("Value", value_input)
+
+        add_button = QPushButton("Add")
+        cancel_button = QPushButton("Cancel")
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(add_button)
+
+        layout = QVBoxLayout()
+        layout.addLayout(form)
+        layout.addLayout(button_layout)
+        dialog.setLayout(layout)
+
+        cancel_button.clicked.connect(dialog.reject)
+
+        def on_add():
+            prop = prop_input.text().strip()
+            value = value_input.text().strip()
+            if not prop:
+                QMessageBox.warning(dialog, "Invalid setprop", "Property name cannot be empty.")
+                return
+            if prop in self.gfxr_setprop_checkboxes or prop in self.gfxr_setprop_inputs:
+                QMessageBox.warning(
+                    dialog,
+                    "Setprop exists",
+                    f"{prop} is already available in GFXR Config. Use the existing control.",
+                )
+                return
+            gfxr_plugin.add_trace_setup_custom_setprop(prop, value)
+            self._buildGfxrConfigGrid()
+            dialog.accept()
+
+        add_button.clicked.connect(on_add)
+        dialog.exec()
+
+    def removeGfxrCustomSetprop(self, prop):
+        """
+        Remove one custom gfxreconstruct setprop.
+        """
+        gfxr_plugin = self.plugins.get("gfxreconstruct")
+        if not gfxr_plugin or not hasattr(gfxr_plugin, "remove_trace_setup_custom_setprop"):
+            return
+        if gfxr_plugin.remove_trace_setup_custom_setprop(prop):
+            self._buildGfxrConfigGrid()
+
+    def clearGfxrCustomSetprops(self):
+        """
+        Clear all custom gfxreconstruct setprops.
+        """
+        gfxr_plugin = self.plugins.get("gfxreconstruct")
+        if not gfxr_plugin or not hasattr(gfxr_plugin, "clear_trace_setup_custom_setprops"):
+            return
+        ret = QMessageBox.question(
+            self,
+            "",
+            "Delete all custom setprops?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if ret != QMessageBox.Yes:
+            return
+        gfxr_plugin.clear_trace_setup_custom_setprops()
+        self._buildGfxrConfigGrid()
+
+    def resetGfxrSetpropsToDefaults(self):
+        """
+        Reset gfxreconstruct setprops to defaults and remove custom ones.
+        """
+        gfxr_plugin = self.plugins.get("gfxreconstruct")
+        if not gfxr_plugin or not hasattr(gfxr_plugin, "reset_trace_setup_setprops_to_defaults"):
+            return
+        ret = QMessageBox.question(
+            self,
+            "",
+            "Reset GFXR setprops to defaults and delete all custom setprops?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if ret != QMessageBox.Yes:
+            return
+        gfxr_plugin.reset_trace_setup_setprops_to_defaults()
+        self._buildGfxrConfigGrid()
+
+    def _buildGfxrConfigGrid(self):
+        """
+        Build or rebuild the GFXR configuration controls.
+        """
+        if not self.gfxr_grid:
+            return
+        gfxr_plugin = self.plugins.get("gfxreconstruct")
+        if not gfxr_plugin:
+            return
+
+        self._clearLayout(self.gfxr_grid)
+        self.gfxr_setprop_checkboxes = {}
+        self.gfxr_setprop_inputs = {}
+        self.gfxr_custom_setprop_inputs = {}
+        self.gfxr_custom_setprop_remove_buttons = {}
+
+        row = 0
+        check_box_manual_tracing = QCheckBox("Enable manual trace start")
+        check_box_manual_tracing.setChecked(self.manual_tracing)
+        check_box_manual_tracing.checkStateChanged.connect(self.setManualTracing)
+        self.gfxr_grid.addWidget(check_box_manual_tracing, row, 0, 1, 3)
+        row += 1
+
+        if hasattr(gfxr_plugin, "get_trace_setup_setprops"):
+            for setprop_item in gfxr_plugin.get_trace_setup_setprops():
+                prop = setprop_item["prop"]
+                value = setprop_item["value"]
+                label = setprop_item.get("label", prop)
+                ui_type = setprop_item.get("ui_type", "checkbox")
+                if ui_type == "text":
+                    input_label = QLabel(f"{label} ({prop})")
+                    input_box = QLineEdit()
+                    input_box.setPlaceholderText("Empty means capture all frames")
+                    input_box.setText(value if value is not None else "")
+                    input_box.textChanged.connect(
+                        lambda text, prop_name=prop: self.setGfxrTraceSetpropValue(prop_name, text)
+                    )
+                    self.gfxr_grid.addWidget(input_label, row, 0)
+                    self.gfxr_grid.addWidget(input_box, row, 1, 1, 2)
+                    self.gfxr_setprop_inputs[prop] = input_box
+                else:
+                    checkbox = QCheckBox(f"{label} ({prop}={value})")
+                    checkbox.setChecked(setprop_item.get("enabled", True))
+                    checkbox.checkStateChanged.connect(
+                        lambda state, prop_name=prop: self.setGfxrTraceSetpropEnabled(prop_name, state)
+                    )
+                    self.gfxr_grid.addWidget(checkbox, row, 0, 1, 3)
+                    self.gfxr_setprop_checkboxes[prop] = checkbox
+                row += 1
+
+        custom_setprops = []
+        if hasattr(gfxr_plugin, "get_trace_setup_custom_setprops"):
+            custom_setprops = gfxr_plugin.get_trace_setup_custom_setprops()
+        if custom_setprops:
+            self.gfxr_grid.addWidget(QLabel("Custom setprops"), row, 0, 1, 3)
+            row += 1
+        for custom_item in custom_setprops:
+            prop = custom_item.get("prop", "")
+            value = custom_item.get("value", "")
+            if not prop:
+                continue
+            input_label = QLabel(f"{prop}")
+            input_box = QLineEdit()
+            input_box.setText(value if value is not None else "")
+            input_box.textChanged.connect(
+                lambda text, prop_name=prop: self.setGfxrTraceSetpropValue(prop_name, text)
+            )
+            remove_button = QPushButton("Remove")
+            remove_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            remove_button.clicked.connect(
+                lambda _, prop_name=prop: self.removeGfxrCustomSetprop(prop_name)
+            )
+            self.gfxr_grid.addWidget(input_label, row, 0)
+            self.gfxr_grid.addWidget(input_box, row, 1)
+            self.gfxr_grid.addWidget(remove_button, row, 2)
+            self.gfxr_custom_setprop_inputs[prop] = input_box
+            self.gfxr_custom_setprop_remove_buttons[prop] = remove_button
+            row += 1
+
+        self.add_custom_setprop_button = QPushButton("Add custom setprop")
+        self.add_custom_setprop_button.clicked.connect(self.openAddGfxrSetpropDialog)
+        clear_custom_setprops_button = QPushButton("Clear custom setprops")
+        clear_custom_setprops_button.clicked.connect(self.clearGfxrCustomSetprops)
+        reset_to_defaults_button = QPushButton("Reset to defaults")
+        reset_to_defaults_button.clicked.connect(self.resetGfxrSetpropsToDefaults)
+        self.gfxr_grid.addWidget(self.add_custom_setprop_button, row, 0)
+        self.gfxr_grid.addWidget(clear_custom_setprops_button, row, 1)
+        self.gfxr_grid.addWidget(reset_to_defaults_button, row, 2)
 
 
     def cleanUpImages(self):
@@ -229,7 +451,9 @@ class UiTraceWidget(PageNavigation):
         self.v_layout = QVBoxLayout(self.tracing_page)
         self.trace_info_label = QLabel(f"Select Appropriate tracer based on the Detected API(s)")
         self.trace_info_label.setAlignment(Qt.AlignCenter)
-        self.widgetStyleSheet(self.trace_info_label, color="#f0f0f0", font_size="16px")
+        self.trace_info_label.setWordWrap(True)
+        self.trace_info_label.setMaximumHeight(78)
+        self.widgetStyleSheet(self.trace_info_label, color="#f0f0f0", font_size="13px")
         button_group = QGroupBox()
         button_group.setFixedHeight(700)
         self.tool_layout = QGridLayout()
@@ -603,7 +827,7 @@ class UiTraceWidget(PageNavigation):
         apis_text = ", ".join(apis) if apis else "Unknown"
         logger.info(f"Detected Engine: {engine or 'Unknown'}\nUsed APIs: {apis_text}")
         self.trace_info_label.setText(
-            f"Detected Engine: {engine or 'Unknown'}\nUsed APIs: {apis_text}\n\n Select Appropriate trace tool. \n Try gfxreconstruct first if available"
+            f"Detected Engine: {engine or 'Unknown'}\nUsed APIs: {apis_text}\nSelect trace tool (prefer gfxreconstruct when available)."
         )
 
         tool_combo_box = QComboBox()
@@ -616,12 +840,9 @@ class UiTraceWidget(PageNavigation):
         self.config_box = QTabWidget()
         # GFXR config options
         self.gfxr_option_widget = QGroupBox("GFXR Config")
-        check_box_manual_tracing = QCheckBox("Enable manual trace start")
-        check_box_manual_tracing.setChecked(False)
-        check_box_manual_tracing.checkStateChanged.connect(self.setManualTracing)
-        gfxr_grid = QGridLayout()
-        gfxr_grid.addWidget(check_box_manual_tracing, 0, 0)
-        self.gfxr_option_widget.setLayout(gfxr_grid)
+        self.gfxr_grid = QGridLayout()
+        self.gfxr_option_widget.setLayout(self.gfxr_grid)
+        self._buildGfxrConfigGrid()
         #PATRACE config options
         self.patrace_option_widget = QGroupBox("PaTrace Config")
 

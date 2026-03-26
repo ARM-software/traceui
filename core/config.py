@@ -68,9 +68,16 @@ class ConfigSettings():
         return config_values
 
     def update_config(self, section, key, value):
+        self.config.read(self.config_path)
+        if not self.config.has_section(section):
+            self.config.add_section(section)
         self.config.set(section, key, value)
         with open(self.config_path, 'w') as configfile:
             self.config.write(configfile)
+
+    def get_value(self, section, key, fallback=None):
+        self.config.read(self.config_path)
+        return self.config.get(section, key, fallback=fallback)
 
 
 class ConfigPatraceWindow(QWidget):
