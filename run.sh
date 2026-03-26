@@ -7,7 +7,7 @@
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd -- "$SCRIPT_DIR"
 
-if [[ $(git diff --quiet) ]]; then
+if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Differences in checked out code - not running update!"
 else
   echo "Updating..."
