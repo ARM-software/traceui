@@ -1,9 +1,14 @@
 import logging
 import os
+from datetime import datetime
 
 LOG_LEVEL_ENV = "TRACEUI_LOG_LEVEL"
 DEFAULT_CONSOLE_LEVEL = "INFO"
 DEFAULT_FILE_LEVEL = "DEBUG"
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOGS_DIR = os.path.join(REPO_ROOT, "logs")
+LOG_TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+LOG_PATH = os.path.join(LOGS_DIR, f"traceui_{LOG_TIMESTAMP}.log")
 
 
 def _parse_level(value: str, fallback: int) -> int:
@@ -22,24 +27,32 @@ def setup_logger(name: str = "traceui") -> logging.Logger:
     logger = logging.getLogger(name)
 
     if logger.hasHandlers():
-        logger.handlers.clear()
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
 
     console_level = _parse_level(os.getenv(LOG_LEVEL_ENV, DEFAULT_CONSOLE_LEVEL), logging.INFO)
     file_level = _parse_level(os.getenv(LOG_LEVEL_ENV, DEFAULT_FILE_LEVEL), logging.DEBUG)
 
     logger.setLevel(min(console_level, file_level))
 
-    formatter = logging.Formatter('%(levelname)s | %(name)s | %(message)s')
+    formatter = logging.Formatter(
+        '%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(console_level)
     console_handler.setFormatter(formatter)
 
-    file_handler = logging.FileHandler('traceui.log')
+    os.makedirs(LOGS_DIR, exist_ok=True)
+
+    file_handler = logging.FileHandler(LOG_PATH)
     file_handler.setLevel(file_level)
     file_handler.setFormatter(formatter)
 
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
+    logger.propagate = False
 
     return logger
