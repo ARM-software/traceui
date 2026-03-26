@@ -630,11 +630,12 @@ class UiTraceWidget(PageNavigation):
         tab_dict["gfxreconstruct"] = self.gfxr_option_widget
 
         trace_tools = ["patrace", "gfxreconstruct"]
+        preselect_gfxr = False
+        tab_index_by_tool = {}
         for key, value in self.plugins.items():
             if value.plugin_name not in trace_tools:
                 continue
             show_tool = False
-            preselect_gfxr = False
             if not self.trace_result["uses_gles"] and not self.trace_result["uses_vulkan"]:
                 # no api detected. Show all tools
                 show_tool = True
@@ -646,16 +647,20 @@ class UiTraceWidget(PageNavigation):
 
             if show_tool:
                 new_tab_idx = self.config_box.addTab(tab_dict[value.plugin_name], value.plugin_name)
+                tab_index_by_tool[value.plugin_name] = new_tab_idx
                 tool_combo_box.addItem(value.plugin_name)
-                if preselect_gfxr:
-                    self.config_box.setCurrentIndex(new_tab_idx)
-                    self.setCurrentTool(value.plugin_name)
-        
-        for i in range(self.config_box.count()):
-            if self.config_box.tabText(i) == tool_combo_box.currentText():
-                self.config_box.setCurrentIndex(i)
-                logger.debug(f"Combo selection: {tool_combo_box.currentText}")
-                break
+
+        selected_tool = tool_combo_box.currentText()
+        if preselect_gfxr and "gfxreconstruct" in tab_index_by_tool:
+            selected_tool = "gfxreconstruct"
+            tool_combo_box.setCurrentText(selected_tool)
+
+        selected_tab_idx = tab_index_by_tool.get(selected_tool)
+        if selected_tab_idx is not None:
+            self.config_box.setCurrentIndex(selected_tab_idx)
+            logger.debug(f"Combo selection: {selected_tool}")
+        if selected_tool:
+            self.setCurrentTool(selected_tool)
 
         tool_combo_box.currentTextChanged.connect(self.changeToolConfigPage)
         # self.config_box.currentChanged.connect()
