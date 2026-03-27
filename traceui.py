@@ -4,15 +4,63 @@ import signal
 import sys
 import os
 import adblib
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 from core.logger_config import setup_logger
 from gui import MainWindow
 
 plugins_path = "plugins"
 logger = setup_logger("traceui.py")
-GLOBAL_FONT_POINT_SIZE = 13
+GLOBAL_FONT_POINT_SIZE = 12
 GLOBAL_POPUP_FONT_POINT_SIZE = 14
+GLOBAL_FONT_FAMILY_CANDIDATES = (
+    "DejaVu Sans",
+    "Noto Sans",
+    "Liberation Sans",
+    "Arial",
+)
+
+
+def choose_global_font_family():
+    """
+    Pick a stable sans-serif font family available in the current Qt runtime.
+    """
+    available_families = set(QFontDatabase.families())
+    for family in GLOBAL_FONT_FAMILY_CANDIDATES:
+        if family in available_families:
+            return family
+    return None
+
+
+def build_global_stylesheet(font_family):
+    font_family_rule = 'font-family: "%s";' % font_family if font_family else ""
+    return """
+        QWidget,
+        QLabel,
+        QPushButton,
+        QLineEdit,
+        QComboBox,
+        QCheckBox,
+        QTabWidget,
+        QTabBar::tab {
+            %s
+            font-size: %dpt;
+        }
+
+        QDialog,
+        QMessageBox,
+        QMessageBox QLabel,
+        QMessageBox QPushButton {
+            %s
+            font-size: %dpt;
+        }
+    """ % (
+        font_family_rule,
+        GLOBAL_FONT_POINT_SIZE,
+        font_family_rule,
+        GLOBAL_POPUP_FONT_POINT_SIZE,
+    )
+
 
 if __name__ == "__main__":
     # Initialize adblib
@@ -29,24 +77,24 @@ if __name__ == "__main__":
         plugin = mod.tracetool(adb)
         plugin_name = plugin.plugin_name
         plugins[plugin_name] = plugin
-        logger.debug("Loaded plugin: plugins/%s -- %s" % (f, plugins[fname].full_name))
+        logger.debug(
+            "Loaded plugin: plugins/%s -- %s" %
+            (f, plugins[fname].full_name))
     sys.path.pop(0)
 
     # Starts and runs the app
     app = QApplication()
+    app.setStyle("Fusion")
     app_font = QFont(app.font())
+    selected_font_family = choose_global_font_family()
+    if selected_font_family:
+        app_font.setFamily(selected_font_family)
     app_font.setPointSize(GLOBAL_FONT_POINT_SIZE)
     app.setFont(app_font)
-    popup_style = """
-        QDialog,
-        QMessageBox,
-        QMessageBox QLabel,
-        QMessageBox QPushButton {
-            font-size: %dpt;
-        }
-    """ % GLOBAL_POPUP_FONT_POINT_SIZE
+    popup_style = build_global_stylesheet(selected_font_family)
     current_style = app.styleSheet().strip()
-    app.setStyleSheet((current_style + "\n" + popup_style) if current_style else popup_style)
+    app.setStyleSheet((current_style + "\n" + popup_style)
+                      if current_style else popup_style)
 
     mainWindow = MainWindow(adb, plugins)
     mainWindow.show()

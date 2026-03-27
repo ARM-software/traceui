@@ -1,6 +1,6 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QDialog, QFormLayout, QLineEdit
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QDialog, QFormLayout, QLineEdit
 from core.page_navigation import PageNavigation, PageIndex
 from core.widgets.connect_device import UIConnectDevice
 
@@ -45,15 +45,14 @@ class UiBaseWidget(PageNavigation):
         """
         Set up widgets on start page
         """
+        app_font = QApplication.font()
         self.header_label = QLabel("Select Action")
-        header_font = QFont()
-        header_font.setPointSize(16)
+        header_font = QFont(app_font)
         header_font.setBold(True)
         self.header_label.setFont(header_font)
         self.header_label.setAlignment(Qt.AlignCenter)
 
-        self.button_font = QFont()
-        self.button_font.setPointSize(16)
+        self.button_font = QFont(app_font)
 
         self.import_button = QPushButton("Import trace")
         self.tracing_button = QPushButton("Generate trace")

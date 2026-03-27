@@ -90,7 +90,7 @@ class UiFrameSelectionWidget(PageNavigation):
         label_informing = QLabel(
             "Please write frame numbers you would like to use")
         label_informing.setStyleSheet(
-            "font-size: 18px; font-weight: bold; color: #444;")
+            "font-weight: bold; color: #444;")
         label_format = QLabel(
             "Format: single number or comma separeted for multiple frames. eg 5,10,15")
         label_informing.setAlignment(Qt.AlignCenter)
@@ -157,7 +157,7 @@ class UiFrameSelectionWidget(PageNavigation):
         """
         confirm_label = QLabel("Please confirm the selected frames")
         confirm_label.setStyleSheet(
-            "font-size: 22px; font-weight: bold; color: #444;")
+            "font-weight: bold; color: #444;")
         confirm_label.setAlignment(Qt.AlignCenter)
         confirm_button = QPushButton("Confirm")
         confirm_button.clicked.connect(
@@ -386,7 +386,7 @@ class UiFrameSelectionWidget(PageNavigation):
         loading_widget = QWidget()
         self.waiting_label.setAlignment(Qt.AlignCenter)
         self.waiting_label.setStyleSheet(
-            "font-size: 16px; font-weight: bold; color: #444;")
+            "font-weight: bold; color: #444;")
         self.waiting_label.setAlignment(Qt.AlignCenter)
 
         h_layout = QVBoxLayout(loading_widget)

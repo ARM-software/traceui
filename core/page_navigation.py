@@ -1,5 +1,5 @@
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (QWidget, QHBoxLayout, QPushButton)
+from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QPushButton)
 
 
 class PageNavigation(QWidget):
@@ -30,7 +30,12 @@ class PageNavigation(QWidget):
         layout.addLayout(nav_layout)
 
     def widgetStyleSheet(self, widget, color: str, font_size: str, selector: str = ""):
-        style_str = f"border: 1px solid #aaa; background-color: {color}; padding: 5px; font-size: {font_size};"
+        app = QApplication.instance()
+        font_family = ""
+        if app is not None:
+            font_family = app.font().family()
+        font_family_rule = f' font-family: "{font_family}";' if font_family else ""
+        style_str = f"border: 1px solid #aaa; background-color: {color}; padding: 5px;{font_family_rule} font-size: {font_size};"
         full = f"{selector} {{ {style_str} }}" if selector else style_str
         widget.setStyleSheet(full)
 

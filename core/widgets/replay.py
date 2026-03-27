@@ -219,7 +219,7 @@ class UiReplayWidget(PageNavigation):
         """
         self.replay_label = QLabel(self._default_replay_label_text)
         self.replay_label.setAlignment(Qt.AlignCenter)
-        self.replay_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #444;")
+        self.replay_label.setStyleSheet("font-weight: bold; color: #444;")
         self.replay_label.setAlignment(Qt.AlignCenter)
         self.h_layout = QHBoxLayout()
         self.h_layout.addStretch()
