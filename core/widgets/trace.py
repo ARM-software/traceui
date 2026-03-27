@@ -7,6 +7,7 @@ from core.config import ConfigSettings, ConfigGfxrWindow, ConfigPatraceWindow
 
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QEventLoop
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QGridLayout, QGroupBox, QSizePolicy, QStackedWidget, QMessageBox, QScrollArea, QLineEdit, QCheckBox, QComboBox, QTabWidget, QDialog, QFormLayout
+from shiboken6 import isValid
 from core.page_navigation import PageNavigation, PageIndex
 from core.adb_thread import AdbThread
 from adblib import print_codes
@@ -96,6 +97,17 @@ class UiTraceWidget(PageNavigation):
         self.lastTrace = None
         self.plugins = plugins
         self.currentTool = None
+        self.app_start_widget = None
+        self.start_application_button = None
+        self.adbWorker = None
+        self.adbThread = None
+
+    def _is_qt_object_valid(self, obj):
+        return obj is not None and isValid(obj)
+
+    def _stop_adb_worker(self):
+        if self._is_qt_object_valid(self.adbWorker):
+            self.adbWorker.stop()
 
     def setManualTracing(self, state):
         """
@@ -335,11 +347,12 @@ class UiTraceWidget(PageNavigation):
         Clean up page and resets to app selection page
         """
         self.currentAppStarted = False
+        self._stop_adb_worker()
         self.nestedStack.setCurrentIndex(PAGE_APP_SELECTION)
         self.adb.clear_logcat()
         self.button_list = None
         self.searchbar.clear()
-        if hasattr(self, "start_application_button") and self.start_application_button.isHidden():
+        if self._is_qt_object_valid(self.start_application_button) and self.start_application_button.isHidden():
             self.start_application_button.show()
 
     def appSelectionPage(self):
@@ -658,10 +671,13 @@ class UiTraceWidget(PageNavigation):
 
     def _appStatus(self, seen:bool):
         self.currentAppStarted = seen
+        if not self._is_qt_object_valid(self.app_start_widget):
+            return
+
         label = self.app_start_widget.findChild(QLabel, "status")
-        if label:
+        if self._is_qt_object_valid(label):
             label.setText("App started!")
-        if not self.start_application_button.isHidden():
+        if self._is_qt_object_valid(self.start_application_button) and not self.start_application_button.isHidden():
             self.start_application_button.hide()
 
 
@@ -695,7 +711,7 @@ class UiTraceWidget(PageNavigation):
         Stop current running tracing and set up the post-trace page
         """
         # Stop tracing with trace tool and reset device
-        self.adbWorker.stop()
+        self._stop_adb_worker()
         if self.plugins[self.currentTool].trace_setup_check(self.currentApp) and self.currentAppStarted:
             self.updatePage()
             QApplication.processEvents()
