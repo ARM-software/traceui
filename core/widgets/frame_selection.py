@@ -301,11 +301,22 @@ class UiFrameSelectionWidget(PageNavigation):
             self.computeFrames()
         elif msg_box.clickedButton() == download_button:
             thread_helper = AdbThread()
-            thread_helper.fileHandler(
+            cancelled, success = thread_helper.run_with_progress(
+                parent=self,
+                title="Downloading trace...",
                 adb=self.replay_widget.adb,
                 file=self.replay_widget.currentTrace,
                 path="tmp",
-                action="pull")
+                action="pull",
+                on_cancel=lambda: None,
+            )
+            if not cancelled and not success:
+                QMessageBox.warning(
+                    self,
+                    "Download failed",
+                    "Trace download failed. Please retry.",
+                )
+                return
             self.cleanup_page()
             self.next_signal.emit(PageIndex.START)
         else:
