@@ -13,6 +13,10 @@ This is to show what functions that is expected to be found in plugins to make i
         def __init__(self, adb)     -> None
         def update(self)            -> None
         def uptodate(self)          -> ? and ?  # return self.basepath.exists() and self.base.exists()
+        def load_capture_config(self, path)     -> None  # optional for CLI capture config support
+        def get_capture_config_template(self)   -> dict  # optional for CLI sample-config support
+        def export_capture_session_state(self)  -> dict  # optional for CLI capture stop support
+        def import_capture_session_state(self, state) -> None  # optional for CLI capture stop support
 
         #-- Tracing commands --
         def trace_setup_device(self, app)       -> None

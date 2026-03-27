@@ -21,11 +21,11 @@ LOG_LEVEL=""
 ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --log-level)
+  --loglevel)
     LOG_LEVEL="$2"
     shift 2
     ;;
-  --log-level=*)
+  --loglevel=*)
     LOG_LEVEL="${1#*=}"
     shift
     ;;

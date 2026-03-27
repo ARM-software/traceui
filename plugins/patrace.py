@@ -1,9 +1,11 @@
 #!/usr/bin/python3
 
+import json
 import os
 from pathlib import Path
 
 import adblib
+from core.capture_config import apply_devicepaths_config, load_plugin_capture_config
 from core.config import ConfigSettings, DEFAULT_DEVICE_LAYER_BASE
 from core.logger_config import setup_logger
 
@@ -20,6 +22,7 @@ class tracetool(object):
         self.full_name = 'Official release of patrace'
         self.variant = 'scratch'
         self.dirname = 'android'
+        self.repo_root = Path(__file__).resolve().parents[1]
         self.tracelib = {
             'arm64-v8a': 'gleslayer/libGLES_layer_arm64.so',
             'armeabi-v7a': 'gleslayer/libGLES_layer_arm.so'}
@@ -28,21 +31,86 @@ class tracetool(object):
             'apk': Path('eglretrace/eglretrace-release.apk'),
             'name': 'com.arm.pa.paretrace'
         }
-        self.basepath = Path('artifacts/patrace')
+        self.basepath = self.repo_root / 'artifacts/patrace'
         self.base = self.basepath / self.dirname
         paths_cfg = ConfigSettings().get_config().get('Paths', {})
         workdir = paths_cfg.get('replay_working_dir', '/sdcard/devlib-target')
+        capture_base = paths_cfg.get('capture_root_base', '/data')
 
         self.sdcard_working_dir = Path(workdir)
         self.capture_app_dir = None
         self.capture_file_fullpath = None
         # changing capture directory not supported
-        self.capture_root_dir = Path("/data/apitrace")
-        self.device_layer_root = Path(DEFAULT_DEVICE_LAYER_BASE) / "gles"
+        self.capture_root_dir = Path(capture_base) / "apitrace"
+        paths_cfg = ConfigSettings().get_config().get('Paths', {})
+        device_layer_base = paths_cfg.get('device_layer_base', '/data/local/debug')
+        self.device_layer_root = Path(device_layer_base) / "gles"
         self.layer_filename = 'libGLES_layer_arm64.so'
 
     def uptodate(self):
         pass
+
+    def _apply_devicepaths_config(self, devicepaths):
+        apply_devicepaths_config(
+            devicepaths,
+            {
+                "replay": lambda value: setattr(self, "sdcard_working_dir", Path(value)),
+                "capture": lambda value: setattr(self, "capture_root_dir", Path(value) / "apitrace"),
+                "layer": lambda value: setattr(self, "device_layer_root", Path(value) / "gles"),
+            },
+        )
+
+    def get_capture_config_template(self):
+        return {
+            "devicepaths": {
+                "layer": str(self.device_layer_root.parent),
+                "replay": str(self.sdcard_working_dir),
+                "capture": str(self.capture_root_dir.parent),
+            },
+            "plugin": {
+                self.plugin_name: {},
+            },
+        }
+
+    def _apply_plugin_capture_config(self, plugin_config):
+        if plugin_config:
+            raise ValueError(f"plugin.{self.plugin_name} does not support any plugin-specific config keys yet.")
+
+    def load_capture_config(self, path):
+        load_plugin_capture_config(
+            path,
+            self.plugin_name,
+            self._apply_devicepaths_config,
+            plugin_config_handler=self._apply_plugin_capture_config,
+        )
+
+    def export_capture_session_state(self):
+        """
+        Export runtime state required to stop an in-progress capture later.
+        """
+        return {
+            "capture_app_dir": str(self.capture_app_dir) if self.capture_app_dir else None,
+            "capture_file_fullpath": str(self.capture_file_fullpath) if self.capture_file_fullpath else None,
+            "capture_root_dir": str(self.capture_root_dir),
+            "sdcard_working_dir": str(self.sdcard_working_dir),
+            "device_layer_root": str(self.device_layer_root),
+            "layer_filename": self.layer_filename,
+        }
+
+    def import_capture_session_state(self, state):
+        """
+        Restore runtime state required to stop an in-progress capture.
+        """
+        self.capture_app_dir = Path(state["capture_app_dir"]) if state.get("capture_app_dir") else None
+        self.capture_file_fullpath = Path(state["capture_file_fullpath"]) if state.get("capture_file_fullpath") else None
+        if state.get("capture_root_dir"):
+            self.capture_root_dir = Path(state["capture_root_dir"])
+        if state.get("sdcard_working_dir"):
+            self.sdcard_working_dir = Path(state["sdcard_working_dir"])
+        if state.get("device_layer_root"):
+            self.device_layer_root = Path(state["device_layer_root"])
+        if state.get("layer_filename"):
+            self.layer_filename = state["layer_filename"]
 
     # Tracing commands
 
@@ -69,13 +137,11 @@ class tracetool(object):
         # Find the layer path
         adb_config_abi = self.adb.configs[self.adb.device]['abi']
         if len(adb_config_abi.split(",")) == 0:
-            layer_path = os.getcwd() / self.basepath / self.dirname / adb_config_abi
+            layer_path = self.basepath / self.dirname / adb_config_abi
         elif "arm64-v8a" in adb_config_abi:
-            layer_path = os.getcwd(
-            ) / self.basepath / self.dirname / self.tracelib["arm64-v8a"]
+            layer_path = self.basepath / self.dirname / self.tracelib["arm64-v8a"]
         else:
-            layer_path = os.getcwd(
-            ) / self.basepath / self.dirname / adb_config_abi.split(',')[0]
+            layer_path = self.basepath / self.dirname / adb_config_abi.split(',')[0]
         # Ensure layer exists in local path
         if not layer_path.exists():
             logger.critical(f"Trace layer not found on local device")

@@ -9,6 +9,7 @@ import hashlib
 import adblib
 from adblib import print_codes
 
+from core.capture_config import apply_devicepaths_config, load_plugin_capture_config
 from core.config import ConfigSettings, DEFAULT_DEVICE_LAYER_BASE
 
 from core.logger_config import setup_logger
@@ -62,6 +63,7 @@ class tracetool(object):
         self.variant = 'internal'
         self.version = 'latest'
         self.dirname = 'android'
+        self.repo_root = Path(__file__).resolve().parents[1]
         self.tracelib = {
             'arm64-v8a': 'layer/arm64-v8a/libVkLayer_gfxreconstruct.so',
             'armeabi-v7a': 'layer/armeabi-v7a/libVkLayer_gfxreconstruct.so'
@@ -72,7 +74,7 @@ class tracetool(object):
             'optimizer': Path('x64/gfxrecon-optimize'),
             'name': 'com.lunarg.gfxreconstruct.replay'
         }
-        self.basepath = Path('artifacts/gfxreconstruct-arm')
+        self.basepath = self.repo_root / 'artifacts/gfxreconstruct-arm'
         self.base = None
         paths_cfg = self.config.get_config().get('Paths', {})
         workdir = paths_cfg.get('replay_working_dir', '/sdcard/devlib-target')
@@ -86,6 +88,16 @@ class tracetool(object):
         self.trace_setup_setprops = [dict(item) for item in self.TRACE_SETUP_SETPROPS_DEFAULTS]
         self.trace_setup_custom_setprops = []
         self._load_trace_setup_config()
+
+    def _apply_devicepaths_config(self, devicepaths):
+        apply_devicepaths_config(
+            devicepaths,
+            {
+                "replay": lambda value: setattr(self, "sdcard_working_dir", Path(value)),
+                "capture": lambda value: setattr(self, "capture_root_dir", Path(value) / "gfxr"),
+                "layer": lambda value: setattr(self, "device_layer_debug_root", Path(value) / "vulkan"),
+            },
+        )
 
     def get_trace_setup_setprops(self):
         """
@@ -264,6 +276,121 @@ class tracetool(object):
             json.dumps(config_payload, separators=(",", ":"))
         )
 
+    def get_capture_config_template(self):
+        setprops = {}
+        for item in self.get_trace_setup_setprops():
+            prop = item["prop"]
+            if item.get("ui_type") == "text":
+                setprops[prop] = str(item.get("value", ""))
+            else:
+                setprops[prop] = bool(item.get("enabled", True))
+
+        return {
+            "devicepaths": {
+                "layer": str(self.device_layer_debug_root.parent),
+                "replay": str(self.sdcard_working_dir),
+                "capture": str(self.capture_root_dir.parent),
+            },
+            "plugin": {
+                self.plugin_name: {
+                    "setprops": setprops,
+                    "custom_setprops": {},
+                }
+            },
+        }
+
+    def _apply_plugin_capture_config(self, plugin_config):
+        allowed_plugin_keys = {"setprops", "setprop", "custom_setprops"}
+        unknown_plugin_keys = set(plugin_config.keys()) - allowed_plugin_keys
+        if unknown_plugin_keys:
+            raise ValueError(
+                f"Unknown keys in plugin.{self.plugin_name}: {sorted(unknown_plugin_keys)}"
+            )
+        if "setprops" in plugin_config and "setprop" in plugin_config:
+            raise ValueError(f"Use only one of 'setprops' or 'setprop' in plugin.{self.plugin_name}.")
+
+        setprops = plugin_config.get("setprops", plugin_config.get("setprop", {}))
+        custom_setprops = plugin_config.get("custom_setprops", {})
+        if not isinstance(setprops, dict):
+            raise ValueError("'setprops' must be a JSON object.")
+        if not isinstance(custom_setprops, dict):
+            raise ValueError("'custom_setprops' must be a JSON object.")
+
+        default_items = {item["prop"]: item for item in self.trace_setup_setprops}
+        unknown_setprops = set(setprops.keys()) - set(default_items.keys())
+        if unknown_setprops:
+            raise ValueError(f"Unknown setprops in capture config: {sorted(unknown_setprops)}")
+
+        # A config file should fully define custom setprops for that invocation.
+        self.trace_setup_custom_setprops = []
+
+        for prop, value in setprops.items():
+            item = default_items[prop]
+            ui_type = item.get("ui_type", "checkbox")
+            if ui_type == "text":
+                if value is None:
+                    item["value"] = ""
+                elif isinstance(value, str):
+                    item["value"] = value
+                else:
+                    raise ValueError(f"Setprop '{prop}' expects a string value.")
+            else:
+                if not isinstance(value, bool):
+                    raise ValueError(f"Setprop '{prop}' expects a boolean value.")
+                item["enabled"] = value
+
+        for prop, value in custom_setprops.items():
+            prop = str(prop).strip()
+            if not prop:
+                raise ValueError("Custom setprop names cannot be empty.")
+            if isinstance(value, (dict, list)):
+                raise ValueError(f"Custom setprop '{prop}' must be a scalar value.")
+            self.trace_setup_custom_setprops.append({
+                "prop": prop,
+                "value": "" if value is None else str(value),
+                "enabled": True,
+                "custom": True,
+                "label": prop,
+                "ui_type": "text",
+            })
+
+    def load_capture_config(self, path):
+        """
+        Load one-off capture config overrides from JSON without persisting them.
+        """
+        load_plugin_capture_config(
+            path,
+            self.plugin_name,
+            self._apply_devicepaths_config,
+            plugin_config_handler=self._apply_plugin_capture_config,
+            legacy_plugin_keys={"setprops", "setprop", "custom_setprops"},
+        )
+
+    def export_capture_session_state(self):
+        """
+        Export runtime state required to stop an in-progress capture later.
+        """
+        return {
+            "capture_file_fullpath": str(self.capture_file_fullpath) if self.capture_file_fullpath else None,
+            "capture_file_name": self.capture_file_name,
+            "capture_root_dir": str(self.capture_root_dir),
+            "sdcard_working_dir": str(self.sdcard_working_dir),
+            "device_layer_debug_root": str(self.device_layer_debug_root),
+        }
+
+    def import_capture_session_state(self, state):
+        """
+        Restore runtime state required to stop an in-progress capture.
+        """
+        self.capture_file_fullpath = Path(state["capture_file_fullpath"]) if state.get("capture_file_fullpath") else None
+        self.capture_file_name = state.get("capture_file_name")
+        if state.get("capture_root_dir"):
+            self.capture_root_dir = Path(state["capture_root_dir"])
+        if state.get("sdcard_working_dir"):
+            self.sdcard_working_dir = Path(state["sdcard_working_dir"])
+        if state.get("device_layer_debug_root"):
+            self.device_layer_debug_root = Path(state["device_layer_debug_root"])
+
     def uptodate(self):
         """
         Checks if gfxr is up to date.
@@ -329,13 +456,11 @@ class tracetool(object):
         adb_config_abi = self.adb.configs[self.adb.device]['abi']
 
         if len(adb_config_abi.split(",")) == 0:
-            layer_path = os.getcwd() / self.basepath / self.dirname / adb_config_abi
+            layer_path = self.basepath / self.dirname / adb_config_abi
         elif "arm64-v8a" in adb_config_abi:
-            layer_path = os.getcwd(
-            ) / self.basepath / self.dirname / self.tracelib["arm64-v8a"]
+            layer_path = self.basepath / self.dirname / self.tracelib["arm64-v8a"]
         else:
-            layer_path = os.getcwd(
-            ) / self.basepath / self.dirname / adb_config_abi.split(',')[0]
+            layer_path = self.basepath / self.dirname / adb_config_abi.split(',')[0]
         # Ensure layer exists in local path
         if not layer_path.exists():
             logger.error("Trace layer not found on local device")

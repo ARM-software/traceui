@@ -1,9 +1,25 @@
 import configparser
 
 from pathlib import Path
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QLineEdit, QFormLayout, QPushButton, QFileDialog
 from core.logger_config import setup_logger
+
+try:
+    from PySide6.QtCore import Qt, Signal
+    from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QLineEdit, QFormLayout, QPushButton, QFileDialog
+    PYSIDE_AVAILABLE = True
+except ModuleNotFoundError:
+    PYSIDE_AVAILABLE = False
+    Qt = None
+
+    class Signal(object):
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _QtUnavailable(object):
+        def __init__(self, *args, **kwargs):
+            raise ModuleNotFoundError("PySide6 is required for GUI configuration windows.")
+
+    QLabel = QVBoxLayout = QWidget = QLineEdit = QFormLayout = QPushButton = QFileDialog = _QtUnavailable
 
 logger = setup_logger("config")
 
