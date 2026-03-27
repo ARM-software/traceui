@@ -312,6 +312,21 @@ class UiFrameRangeWidget(PageNavigation):
                     widget.setParent(None)
                     widget.deleteLater()
 
+    def cleanupLayout(self, layout):
+        """
+        Remove all items from a layout so it can be rebuilt without stacking duplicates.
+        """
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            child_layout = item.layout()
+            if widget is not None:
+                widget.setParent(None)
+            elif child_layout is not None:
+                self.cleanupLayout(child_layout)
+
     def setupLayouts(self):
         """
         Set up frame range page layout with page nav buttons.
@@ -319,6 +334,7 @@ class UiFrameRangeWidget(PageNavigation):
         input_layout = QFormLayout()
         input_layout.addRow(self.framerange_edit_label, self.framerange_input)
 
+        self.cleanupLayout(self.v_layout)
         self.cleanupBoxLayout(self.frame_timeline)
         self.v_layout.addWidget(self.page_info)
         #self.v_layout.addWidget(self.framerange_header)
@@ -357,7 +373,8 @@ class UiFrameRangeWidget(PageNavigation):
         frame_range_layout.addWidget(self.continue_select_button)
         self.v_layout.addLayout(frame_range_layout)
 
-        self.setLayout(self.v_layout)
+        if self.layout() is None:
+            self.setLayout(self.v_layout)
 
     def thread_completed(self, results):
         self.pixmaps = results
