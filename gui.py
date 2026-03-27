@@ -205,20 +205,31 @@ class MainWindow(QMainWindow):
                 font-size: 16px;
             }
             QGroupBox QPushButton {
-                border: 2px solid #aaa;
-                background-color: #eee;
-                padding: 5px;
+                border: 1px solid #8e98a3;
+                border-radius: 6px;
+                background-color: #e9edf2;
+                color: #20242a;
+                padding: 8px 14px;
                 font-size: 18px;
             }
+            QGroupBox QPushButton:hover {
+                background-color: #f5f7fa;
+                border-color: #717b87;
+            }
+            QGroupBox QPushButton:pressed {
+                background-color: #d9dee5;
+                border-color: #5e6872;
+                padding-top: 9px;
+                padding-bottom: 7px;
+            }
             QGroupBox QPushButton[current="true"] {
-                background-color: #eee;
-                border: 2px solid #676767;
-                font
+                background-color: #d7dde5;
+                border: 1px solid #5e6872;
             }
             QGroupBox QPushButton[future="true"] {
-                background-color: #ddd;
-                color: #999;
-                border-style: dashed;
+                background-color: #e3e6ea;
+                color: #8c939c;
+                border: 1px dashed #c0c6cd;
             }
         """)
 

@@ -1,4 +1,5 @@
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QPushButton)
 
 
@@ -34,9 +35,54 @@ class PageNavigation(QWidget):
         font_family = ""
         if app is not None:
             font_family = app.font().family()
-        font_family_rule = f' font-family: "{font_family}";' if font_family else ""
-        style_str = f"border: 1px solid #aaa; background-color: {color}; padding: 5px;{font_family_rule} font-size: {font_size};"
-        full = f"{selector} {{ {style_str} }}" if selector else style_str
+        font_family_rule = f'font-family: "{font_family}";' if font_family else ""
+        qcolor = QColor(color)
+        if not qcolor.isValid():
+            qcolor = QColor("#e9edf2")
+        border_color = qcolor.darker(125).name()
+        hover_color = qcolor.lighter(108).name()
+        pressed_color = qcolor.darker(112).name()
+        text_color = "#20242a"
+
+        if selector == "QPushButton":
+            style_str = """
+                %(selector)s {
+                    border: 1px solid %(border)s;
+                    border-radius: 6px;
+                    background-color: %(base)s;
+                    color: %(text)s;
+                    padding: 8px 16px;
+                    %(font_family)s
+                    font-size: %(font_size)s;
+                }
+                %(selector)s:hover {
+                    background-color: %(hover)s;
+                    border-color: %(border)s;
+                }
+                %(selector)s:pressed {
+                    background-color: %(pressed)s;
+                    border-color: %(border)s;
+                    padding-top: 9px;
+                    padding-bottom: 7px;
+                }
+                %(selector)s:disabled {
+                    background-color: #e3e6ea;
+                    color: #8c939c;
+                    border-color: #c0c6cd;
+                }
+            """ % {
+                "selector": selector,
+                "border": border_color,
+                "base": qcolor.name(),
+                "text": text_color,
+                "font_family": font_family_rule,
+                "font_size": font_size,
+                "hover": hover_color,
+                "pressed": pressed_color,
+            }
+        else:
+            style_str = f"border: 1px solid {border_color}; background-color: {qcolor.name()}; color: {text_color}; padding: 8px 16px; {font_family_rule} font-size: {font_size};"
+        full = f"{selector} {{ {style_str} }}" if selector and selector != "QPushButton" else style_str
         widget.setStyleSheet(full)
 
 

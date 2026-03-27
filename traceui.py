@@ -37,7 +37,6 @@ def build_global_stylesheet(font_family):
     return """
         QWidget,
         QLabel,
-        QPushButton,
         QLineEdit,
         QComboBox,
         QCheckBox,
@@ -54,11 +53,47 @@ def build_global_stylesheet(font_family):
             %s
             font-size: %dpt;
         }
+
+        QPushButton {
+            %s
+            font-size: %dpt;
+            min-height: 36px;
+            padding: 8px 16px;
+            border: 1px solid #8e98a3;
+            border-radius: 6px;
+            background-color: #e9edf2;
+            color: #20242a;
+        }
+
+        QPushButton:hover {
+            background-color: #f5f7fa;
+            border-color: #717b87;
+        }
+
+        QPushButton:pressed {
+            background-color: #d9dee5;
+            border-color: #5e6872;
+            padding-top: 9px;
+            padding-bottom: 7px;
+        }
+
+        QPushButton:checked {
+            background-color: #d3dae3;
+            border-color: #58616b;
+        }
+
+        QPushButton:disabled {
+            background-color: #e3e6ea;
+            color: #8c939c;
+            border-color: #c0c6cd;
+        }
     """ % (
         font_family_rule,
         GLOBAL_FONT_POINT_SIZE,
         font_family_rule,
         GLOBAL_POPUP_FONT_POINT_SIZE,
+        font_family_rule,
+        GLOBAL_FONT_POINT_SIZE,
     )
 
 
