@@ -36,10 +36,14 @@ class WorkerAdbProcess(QObject):
 
     def run_analyse_apk(self):
         logger.debug(f"Analysing Engine and API for '{self.proc_name}'")
-        pkg_name, uses_vulkan, uses_gles, engine = self.adb.analyze_package(self.proc_name)
-
-        self.result_ready.emit((pkg_name, uses_vulkan, uses_gles, engine))
-        self.finished.emit(True)
+        try:
+            pkg_name, uses_vulkan, uses_gles, engine = self.adb.analyze_package(self.proc_name)
+            self.result_ready.emit((pkg_name, uses_vulkan, uses_gles, engine))
+            self.finished.emit(True)
+        except Exception:
+            logger.exception(f"Failed to analyse package '{self.proc_name}'")
+            self.result_ready.emit((self.proc_name, None, None, None))
+            self.finished.emit(False)
 
     def run_app_start_poll(self):
         # Poll for the process on the device
@@ -388,7 +392,6 @@ class UiTraceWidget(PageNavigation):
         """
         Set up loading page for analysing packages
         """
-        self.adb.cleanUpSDCard(str(self.replay_working_dir))
         self.cleanUpImages()
         self.loading_page = QWidget()
         layout = QVBoxLayout()
@@ -438,7 +441,6 @@ class UiTraceWidget(PageNavigation):
             self.adbWorker.finished.connect(self.adbWorker.deleteLater)
             self.adbThread.finished.connect(self.adbThread.deleteLater)
             self.adbWorker.finished.connect(self.go_to_tracing_page)
-            QTimer.singleShot(0, self.adbThread.start)
             self.adbThread.start()
             self.traceToolSelectionPage()
         else:

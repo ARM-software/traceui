@@ -497,10 +497,29 @@ class adb(object):
 
         return device
 
-    def cleanUpSDCard(self, working_dir="/sdcard/devlib-target"):
+    def cleanUpSDCard(self, working_dir="/sdcard/devlib-target", older_than_days=30, delete=False):
+        """
+        List stale files in the device working directory and optionally delete them.
+        """
         stdout, _ = self.command(['ls', working_dir], True, errors_handled_externally=True)
-        if stdout:
-            self.command(["rm", "-r", working_dir], True)
+        if not stdout:
+            return []
+
+        stdout, _ = self.command(
+            [f'find "{working_dir}" -mindepth 1 -type f -mtime +{int(older_than_days)} | sort'],
+            True,
+            errors_handled_externally=True,
+        )
+        files = [line.strip() for line in stdout.splitlines() if line.strip()]
+        if files:
+            logger.debug(
+                f"Files older than {older_than_days} days in {working_dir}:\n" + "\n".join(files)
+            )
+        if delete:
+            for file_path in files:
+                self.command(['rm', '-f', file_path], True, errors_handled_externally=True)
+        return files
+
 
 if __name__ == '__main__':
     a = adb()

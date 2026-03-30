@@ -12,7 +12,7 @@ from gui import MainWindow
 plugins_path = "plugins"
 logger = setup_logger("traceui.py")
 GLOBAL_FONT_POINT_SIZE = 12
-GLOBAL_POPUP_FONT_POINT_SIZE = 14
+GLOBAL_POPUP_FONT_POINT_SIZE = 12
 GLOBAL_FONT_FAMILY_CANDIDATES = (
     "DejaVu Sans",
     "Noto Sans",

@@ -1,6 +1,6 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QDialog, QFormLayout, QLineEdit
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QDialog, QFormLayout, QLineEdit, QCheckBox, QMessageBox
 from core.page_navigation import PageNavigation, PageIndex
 from core.widgets.connect_device import UIConnectDevice
 
@@ -30,6 +30,7 @@ class UiBaseWidget(PageNavigation):
         self.replay_working_dir = replay_working_dir
         self.capture_root_base = capture_root_base
         self.device_layer_base = device_layer_base
+        self.cleanup_working_dir_enabled = True
         self.device_window = None
         self.setupWidgets()
         self.setupLayouts()
@@ -105,11 +106,14 @@ class UiBaseWidget(PageNavigation):
         capture_input = QLineEdit(self.capture_root_base)
         layer_label = QLabel("Trace layer directory")
         layer_input = QLineEdit(self.device_layer_base)
+        cleanup_checkbox = QCheckBox("Check device working directory files older than 20 days")
+        cleanup_checkbox.setChecked(self.cleanup_working_dir_enabled)
 
         form = QFormLayout()
         form.addRow(replay_label, replay_input)
         form.addRow(capture_label, capture_input)
         form.addRow(layer_label, layer_input)
+        form.addRow("", cleanup_checkbox)
 
         save_btn = QPushButton("Save")
         save_btn.clicked.connect(dialog.accept)
@@ -118,6 +122,7 @@ class UiBaseWidget(PageNavigation):
             replay_input.setText(self.DEFAULT_REPLAY_WORKING_DIR)
             capture_input.setText(self.DEFAULT_CAPTURE_ROOT_BASE)
             layer_input.setText(self.DEFAULT_DEVICE_LAYER_BASE)
+            cleanup_checkbox.setChecked(True)
         reset_btn.clicked.connect(reset_defaults)
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(dialog.reject)
@@ -136,6 +141,7 @@ class UiBaseWidget(PageNavigation):
             new_dir = replay_input.text().strip()
             capture_base = capture_input.text().strip()
             layer_base = layer_input.text().strip()
+            self.cleanup_working_dir_enabled = cleanup_checkbox.isChecked()
             if new_dir and new_dir != self.replay_working_dir:
                 self.replay_working_dir = new_dir
                 self.replay_dir_changed.emit(new_dir)
@@ -150,6 +156,7 @@ class UiBaseWidget(PageNavigation):
         """
         Emit signal to trace import page
         """
+        self._cleanup_device_sdcard()
         self.trace_import_signal.emit()
         self.next_signal.emit(PageIndex.TRACE_IMPORTER)
 
@@ -158,10 +165,31 @@ class UiBaseWidget(PageNavigation):
         Check if device is connected and open "connect device" page if not
         """
         if self.adb.device:
+            self._cleanup_device_sdcard()
             self.trace_start_signal.emit()
             self.next_signal.emit(PageIndex.TRACE)
         else:
             self.connect_device()
+
+    def _cleanup_device_sdcard(self):
+        if self.adb.device and self.cleanup_working_dir_enabled:
+            stale_files = self.adb.cleanUpSDCard(str(self.replay_working_dir))
+            if stale_files and self._confirm_stale_device_files(stale_files):
+                self.adb.cleanUpSDCard(str(self.replay_working_dir), delete=True)
+
+    def _confirm_stale_device_files(self, stale_files):
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Old Device Files Found")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText(
+            f"Found {len(stale_files)} file(s) older than 30 days in {self.replay_working_dir}."
+        )
+        msg.setDetailedText("\n".join(stale_files))
+        cleanup_button = msg.addButton("Cleanup", QMessageBox.AcceptRole)
+        skip_button = msg.addButton("Skip delete", QMessageBox.RejectRole)
+        msg.setDefaultButton(cleanup_button)
+        msg.exec()
+        return msg.clickedButton() == cleanup_button
 
     def connect_device(self):
         """
