@@ -1,18 +1,22 @@
 from core.config import ClickableQLineEdit, openFileExplorer
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QLineEdit, QFormLayout, QPushButton, QCheckBox
-from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QDialog, QLineEdit, QFormLayout, QPushButton, QCheckBox
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QCloseEvent
 
 
-class ImportWindow(QWidget):
+class ImportWindow(QDialog):
     killed = Signal()
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setWindowTitle("Import trace.")
         self.trace = ""
         self.frame_range = ""
         self._got_trace = False
+        self._centering = False
+        self.setModal(True)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setFixedWidth(720)
 
         self.setUpWidgets()
         self.setUpLayout()
@@ -51,6 +55,26 @@ class ImportWindow(QWidget):
 
         self.setLayout(layout2)
         self.show()
+
+    def _center_on_parent(self):
+        parent = self.parentWidget()
+        if not parent:
+            return
+        parent_rect = parent.frameGeometry()
+        target_x = parent_rect.x() + (parent_rect.width() - self.width()) // 2
+        target_y = parent_rect.y() + (parent_rect.height() - self.height()) // 2
+        self._centering = True
+        self.move(target_x, target_y)
+        self._centering = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._center_on_parent()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if not self._centering:
+            self._center_on_parent()
 
     def updateTrace(self):
         """

@@ -96,7 +96,7 @@ class UiTraceImportWidget(PageNavigation):
         """
         Open import window and respond to actions
         """
-        self.importWindow = ImportWindow()
+        self.importWindow = ImportWindow(self.window())
         self.importWindow.button.clicked.connect(self.update)
         self.importWindow.killed.connect(self.goback)
 
@@ -114,17 +114,19 @@ class UiTraceImportWidget(PageNavigation):
         self.trace = self.importWindow.getTrace()
         if not self.trace:
             logger.warning(f"Trace input empty, please provide a trace path")
-            msg = QMessageBox()
-            msg.setText("Please provide a file")
-            msg.exec()
-            self.cleanup_page()
+            QMessageBox.warning(self.importWindow, "Import Trace", "Please provide a file.")
+            self.importWindow.raise_()
+            self.importWindow.activateWindow()
             return
         elif not os.path.getsize(self.trace):
             logger.error(f"File is empty. Please select non-empty trace file")
-            msg = QMessageBox()
-            msg.setText("The provided file was empty. Please provide a non-empty trace file")
-            msg.exec()
-            self.cleanup_page()
+            QMessageBox.warning(
+                self.importWindow,
+                "Import Trace",
+                "The provided file was empty. Please provide a non-empty trace file.",
+            )
+            self.importWindow.raise_()
+            self.importWindow.activateWindow()
             return
 
         self.override_trace_if_existing = self.importWindow.overrideIfExisting()
