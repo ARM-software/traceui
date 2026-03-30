@@ -157,6 +157,23 @@ class ReplayWorker(QObject):
         self.finished.emit(True)
 
 
+class ReplaySetupWorker(QObject):
+    finished = Signal(bool)
+    error = Signal(Exception)
+
+    def __init__(self, tool):
+        super().__init__()
+        self.tool = tool
+
+    def setup_replay(self):
+        try:
+            self.tool.replay_setup()
+            self.finished.emit(True)
+        except Exception as e:
+            self.error.emit(e)
+            self.finished.emit(False)
+
+
 class UiReplayWidget(PageNavigation):
     frame_range_signal = Signal()
     ff_done = Signal()
@@ -247,9 +264,27 @@ class UiReplayWidget(PageNavigation):
         if trace is not None:
             trace_used = trace
         self.errorsLastReplay = False
+        self._replay_results = None
+        self._replay_exception = None
         self.adb.clear_logcat()
         self.currentTool.adb = self.adb
-        self.currentTool.replay_setup()
+        self.replay_label.setText("Installing replayer on device. Check Device for a popup...")
+        self._setup_event_loop = QEventLoop()
+        self.setup_thread = QThread()
+        self.setup_worker = ReplaySetupWorker(self.currentTool)
+        self.setup_worker.moveToThread(self.setup_thread)
+        self.setup_thread.started.connect(self.setup_worker.setup_replay)
+        self.setup_worker.error.connect(self._handle_worker_error)
+        self.setup_worker.finished.connect(self.setup_thread.quit)
+        self.setup_worker.finished.connect(self._setup_event_loop.quit)
+        self.setup_worker.finished.connect(self.setup_worker.deleteLater)
+        self.setup_thread.finished.connect(self.setup_thread.deleteLater)
+        self.setup_thread.start()
+        self._setup_event_loop.exec()
+        if self._replay_exception is not None:
+            logger.error(f"Failed during replay setup: {self._replay_exception}")
+            QMessageBox.warning(self, "Replay setup failed", str(self._replay_exception))
+            return None
         self.replay_label.setText("Cleaning the device. Please wait.")
 
         self._cleanup_event_loop = QEventLoop()
@@ -363,5 +398,7 @@ class UiReplayWidget(PageNavigation):
     def _handle_worker_error(self, exception):
         self._replay_results = None
         self._replay_exception = exception
+        if hasattr(self, "_setup_event_loop") and self._setup_event_loop:
+            self._setup_event_loop.quit()
         if self._replay_event_loop:
             self._replay_event_loop.quit()
