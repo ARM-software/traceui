@@ -1,8 +1,31 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QObject, QThread
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QDialog, QFormLayout, QLineEdit, QCheckBox, QMessageBox
 from core.page_navigation import PageNavigation, PageIndex
 from core.widgets.connect_device import UIConnectDevice
+from core.logger_config import setup_logger
+
+logger = setup_logger("base")
+
+
+class DeviceCleanupWorker(QObject):
+    finished = Signal(bool)
+
+    def __init__(self, adb, working_dir, files):
+        super().__init__()
+        self.adb = adb
+        self.working_dir = str(working_dir)
+        self.files = [str(file_path) for file_path in files]
+
+    def run(self):
+        success = True
+        try:
+            self.adb.cleanUpSDCard(self.working_dir, delete=True, files=self.files)
+        except Exception:
+            logger.exception("Failed to clean up stale device files")
+            success = False
+        self.finished.emit(success)
+
 
 class UiBaseWidget(PageNavigation):
     DEFAULT_REPLAY_WORKING_DIR = "/sdcard/devlib-target"
@@ -32,6 +55,8 @@ class UiBaseWidget(PageNavigation):
         self.device_layer_base = device_layer_base
         self.cleanup_working_dir_enabled = True
         self.device_window = None
+        self._cleanup_thread = None
+        self._cleanup_worker = None
         self.setupWidgets()
         self.setupLayouts()
 
@@ -106,7 +131,7 @@ class UiBaseWidget(PageNavigation):
         capture_input = QLineEdit(self.capture_root_base)
         layer_label = QLabel("Trace layer directory")
         layer_input = QLineEdit(self.device_layer_base)
-        cleanup_checkbox = QCheckBox("Check device working directory files older than 20 days")
+        cleanup_checkbox = QCheckBox("Check device working directory files older than 30 days")
         cleanup_checkbox.setChecked(self.cleanup_working_dir_enabled)
 
         form = QFormLayout()
@@ -175,7 +200,34 @@ class UiBaseWidget(PageNavigation):
         if self.adb.device and self.cleanup_working_dir_enabled:
             stale_files = self.adb.cleanUpSDCard(str(self.replay_working_dir))
             if stale_files and self._confirm_stale_device_files(stale_files):
-                self.adb.cleanUpSDCard(str(self.replay_working_dir), delete=True)
+                self._start_cleanup_device_sdcard(stale_files)
+
+    def _start_cleanup_device_sdcard(self, stale_files):
+        if self._cleanup_thread and self._cleanup_thread.isRunning():
+            logger.info("Device cleanup already in progress, skipping duplicate cleanup request")
+            return
+
+        logger.info(f"Starting background cleanup of {len(stale_files)} stale device files")
+        self._cleanup_worker = DeviceCleanupWorker(self.adb, self.replay_working_dir, stale_files)
+        self._cleanup_thread = QThread()
+        self._cleanup_worker.moveToThread(self._cleanup_thread)
+        self._cleanup_thread.started.connect(self._cleanup_worker.run)
+        self._cleanup_worker.finished.connect(self._on_cleanup_device_sdcard_finished)
+        self._cleanup_worker.finished.connect(self._cleanup_thread.quit)
+        self._cleanup_worker.finished.connect(self._cleanup_worker.deleteLater)
+        self._cleanup_thread.finished.connect(self._cleanup_thread.deleteLater)
+        self._cleanup_thread.finished.connect(self._reset_cleanup_device_sdcard_state)
+        self._cleanup_thread.start()
+
+    def _on_cleanup_device_sdcard_finished(self, success):
+        if success:
+            logger.info("Background device cleanup completed")
+        else:
+            logger.warning("Background device cleanup completed with errors")
+
+    def _reset_cleanup_device_sdcard_state(self):
+        self._cleanup_worker = None
+        self._cleanup_thread = None
 
     def _confirm_stale_device_files(self, stale_files):
         msg = QMessageBox(self)

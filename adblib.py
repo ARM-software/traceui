@@ -497,20 +497,26 @@ class adb(object):
 
         return device
 
-    def cleanUpSDCard(self, working_dir="/sdcard/devlib-target", older_than_days=30, delete=False):
+    def cleanUpSDCard(self, working_dir="/sdcard/devlib-target", older_than_days=30, delete=False, files=None):
         """
         List stale files in the device working directory and optionally delete them.
-        """
-        stdout, _ = self.command(['ls', working_dir], True, errors_handled_externally=True)
-        if not stdout:
-            return []
 
-        stdout, _ = self.command(
-            [f'find "{working_dir}" -mindepth 1 -type f -mtime +{int(older_than_days)} | sort'],
-            True,
-            errors_handled_externally=True,
-        )
-        files = [line.strip() for line in stdout.splitlines() if line.strip()]
+        If ``files`` is provided, those paths are used for deletion instead of
+        running a fresh device scan.
+        """
+        if files is None:
+            stdout, _ = self.command(['ls', working_dir], True, errors_handled_externally=True)
+            if not stdout:
+                return []
+
+            stdout, _ = self.command(
+                [f'find "{working_dir}" -mindepth 1 -type f -mtime +{int(older_than_days)} | sort'],
+                True,
+                errors_handled_externally=True,
+            )
+            files = [line.strip() for line in stdout.splitlines() if line.strip()]
+        else:
+            files = [str(file_path).strip() for file_path in files if str(file_path).strip()]
         if files:
             logger.debug(
                 f"Files older than {older_than_days} days in {working_dir}:\n" + "\n".join(files)
