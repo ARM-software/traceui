@@ -602,7 +602,7 @@ class UiTraceWidget(PageNavigation):
             logger.debug(f"Device was set up for tracing '{self.currentApp}' using '{self.currentTool}")
             if self.currentTool == "gfxreconstruct" and self.manual_tracing:
                 # set prop "capture_android_trigger" based on tickbox
-                self.adb.setprop('debug.gfxr.capture_android_trigger', 'false')
+                self.adb.setprop('debug.gfxrecon.capture_android_trigger', '')
             logger.debug(f"Manual trace start set to {self.manual_tracing}")
 
             # Page #1: App start / tracing
@@ -713,6 +713,7 @@ class UiTraceWidget(PageNavigation):
         Stop current running tracing and set up the post-trace page
         """
         # Stop tracing with trace tool and reset device
+        self.adb.setprop('debug.gfxrecon.capture_android_trigger', 'false')
         self._stop_adb_worker()
         if self.plugins[self.currentTool].trace_setup_check(self.currentApp) and self.currentAppStarted:
             self.updatePage()
