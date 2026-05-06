@@ -45,7 +45,6 @@ class MainWindow(QMainWindow):
         self.config = ConfigSettings()
         self.replay_working_dir = Path(self.config.get_config()['Paths'].get('replay_working_dir', '/sdcard/devlib-target'))
         self.capture_root_base = self.config.get_config()['Paths'].get('capture_root_base', '/data')
-        self.device_layer_base = self.config.get_config()['Paths'].get('device_layer_base', '/data/local/debug')
         for plugin in self.plugins.values():
             if hasattr(plugin, "sdcard_working_dir"):
                 plugin.sdcard_working_dir = self.replay_working_dir
@@ -114,7 +113,7 @@ class MainWindow(QMainWindow):
         self.step_buttons = []
         self.visited_pages = set()
         self.widget_connect = UIConnectDevice(self.adb)
-        self.widget_base = UiBaseWidget(self.adb, self.trace, str(self.replay_working_dir), self.capture_root_base, self.device_layer_base)
+        self.widget_base = UiBaseWidget(self.adb, self.trace, str(self.replay_working_dir), self.capture_root_base)
         self.widget_trace = UiTraceWidget(self.adb, self.plugins, self.replay_working_dir)
         self.widget_replay = UiReplayWidget(self.adb, self.plugins, self.replay_working_dir)
         self.widget_framerange = UiFrameRangeWidget()
@@ -157,7 +156,6 @@ class MainWindow(QMainWindow):
         self.pages[PageIndex.START].trace_import_signal.connect(self.move_to_trace_import_widget)
         self.pages[PageIndex.START].replay_dir_changed.connect(self.update_replay_working_dir)
         self.pages[PageIndex.START].capture_base_changed.connect(self.update_capture_root_base)
-        self.pages[PageIndex.START].layer_base_changed.connect(self.update_layer_base)
         # trace
         self.pages[PageIndex.TRACE].goback_signal.connect(lambda: self.set_page(PageIndex.START))
         self.pages[PageIndex.TRACE].loading_signal.connect(lambda: self.stacked.setCurrentIndex(PageIndex.LOADING))
@@ -297,21 +295,6 @@ class MainWindow(QMainWindow):
                     plugin.capture_root_dir = Path(new_base) / "apitrace"
                 elif plugin.plugin_name == "gfxreconstruct":
                     plugin.capture_root_dir = Path(new_base) / "gfxr"
-
-    def update_layer_base(self, new_base: str):
-        """
-        Update device layer base across plugins and config.
-        """
-        if not new_base:
-            return
-        self.device_layer_base = new_base
-        self.config.update_config('Paths', 'device_layer_base', str(new_base))
-        for plugin in self.plugins.values():
-            if hasattr(plugin, "device_layer_root"):
-                if plugin.plugin_name == "patrace":
-                    plugin.device_layer_root = Path(new_base) / "gles"
-                elif plugin.plugin_name == "gfxreconstruct":
-                    plugin.device_layer_debug_root = Path(new_base) / "gfxr"
 
     def readStateFromImporter(self):
         """

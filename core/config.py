@@ -7,6 +7,8 @@ from core.logger_config import setup_logger
 
 logger = setup_logger("config")
 
+DEFAULT_DEVICE_LAYER_BASE = '/data/local/debug'
+
 class ConfigSettings():
     def __init__(self):
         self.config = configparser.ConfigParser()
@@ -51,8 +53,6 @@ class ConfigSettings():
         hwc_path = self.config.get('Paths', 'hwc_path')
         replay_working_dir = self.config.get('Paths', 'replay_working_dir', fallback='/sdcard/devlib-target')
         capture_root_base = self.config.get('Paths', 'capture_root_base', fallback='/data')
-        device_layer_base = self.config.get('Paths', 'device_layer_base', fallback='/data/local/debug')
-
         config_values = {
             'Paths': {
                 'pat_path': pat_path,
@@ -61,7 +61,7 @@ class ConfigSettings():
                 'hwc_path': hwc_path,
                 'replay_working_dir': replay_working_dir,
                 'capture_root_base': capture_root_base,
-                'device_layer_base': device_layer_base,
+                'device_layer_base': DEFAULT_DEVICE_LAYER_BASE,
             }
         }
 

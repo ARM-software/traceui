@@ -30,16 +30,14 @@ class DeviceCleanupWorker(QObject):
 class UiBaseWidget(PageNavigation):
     DEFAULT_REPLAY_WORKING_DIR = "/sdcard/devlib-target"
     DEFAULT_CAPTURE_ROOT_BASE = "/data"
-    DEFAULT_DEVICE_LAYER_BASE = "/data/local/debug"
 
     trace_start_signal = Signal()
     trace_import_signal = Signal()
     postproc_signal = Signal()
     replay_dir_changed = Signal(str)
     capture_base_changed = Signal(str)
-    layer_base_changed = Signal(str)
 
-    def __init__(self, adb, trace, replay_working_dir, capture_root_base="/data", device_layer_base="/data/local/debug"):
+    def __init__(self, adb, trace, replay_working_dir, capture_root_base="/data"):
         """
         Initialize the base
 
@@ -52,7 +50,6 @@ class UiBaseWidget(PageNavigation):
         self.trace = trace
         self.replay_working_dir = replay_working_dir
         self.capture_root_base = capture_root_base
-        self.device_layer_base = device_layer_base
         self.cleanup_working_dir_enabled = True
         self.device_window = None
         self._cleanup_thread = None
@@ -129,15 +126,12 @@ class UiBaseWidget(PageNavigation):
         replay_input = QLineEdit(self.replay_working_dir)
         capture_label = QLabel("Trace capture directory")
         capture_input = QLineEdit(self.capture_root_base)
-        layer_label = QLabel("Trace layer directory")
-        layer_input = QLineEdit(self.device_layer_base)
         cleanup_checkbox = QCheckBox("Check device working directory files older than 30 days")
         cleanup_checkbox.setChecked(self.cleanup_working_dir_enabled)
 
         form = QFormLayout()
         form.addRow(replay_label, replay_input)
         form.addRow(capture_label, capture_input)
-        form.addRow(layer_label, layer_input)
         form.addRow("", cleanup_checkbox)
 
         save_btn = QPushButton("Save")
@@ -146,7 +140,6 @@ class UiBaseWidget(PageNavigation):
         def reset_defaults():
             replay_input.setText(self.DEFAULT_REPLAY_WORKING_DIR)
             capture_input.setText(self.DEFAULT_CAPTURE_ROOT_BASE)
-            layer_input.setText(self.DEFAULT_DEVICE_LAYER_BASE)
             cleanup_checkbox.setChecked(True)
         reset_btn.clicked.connect(reset_defaults)
         cancel_btn = QPushButton("Cancel")
@@ -165,7 +158,6 @@ class UiBaseWidget(PageNavigation):
         if dialog.exec():
             new_dir = replay_input.text().strip()
             capture_base = capture_input.text().strip()
-            layer_base = layer_input.text().strip()
             self.cleanup_working_dir_enabled = cleanup_checkbox.isChecked()
             if new_dir and new_dir != self.replay_working_dir:
                 self.replay_working_dir = new_dir
@@ -173,9 +165,6 @@ class UiBaseWidget(PageNavigation):
             if capture_base and capture_base != self.capture_root_base:
                 self.capture_root_base = capture_base
                 self.capture_base_changed.emit(capture_base)
-            if layer_base and layer_base != self.device_layer_base:
-                self.device_layer_base = layer_base
-                self.layer_base_changed.emit(layer_base)
 
     def traceImport(self):
         """

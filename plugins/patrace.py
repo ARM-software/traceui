@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import adblib
-from core.config import ConfigSettings
+from core.config import ConfigSettings, DEFAULT_DEVICE_LAYER_BASE
 from core.logger_config import setup_logger
 
 
@@ -38,9 +38,7 @@ class tracetool(object):
         self.capture_file_fullpath = None
         # changing capture directory not supported
         self.capture_root_dir = Path("/data/apitrace")
-        paths_cfg = ConfigSettings().get_config().get('Paths', {})
-        device_layer_base = paths_cfg.get('device_layer_base', '/data/local/debug')
-        self.device_layer_root = Path(device_layer_base) / "gles"
+        self.device_layer_root = Path(DEFAULT_DEVICE_LAYER_BASE) / "gles"
         self.layer_filename = 'libGLES_layer_arm64.so'
 
     def uptodate(self):

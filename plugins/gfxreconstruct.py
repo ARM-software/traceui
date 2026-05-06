@@ -9,7 +9,7 @@ import hashlib
 import adblib
 from adblib import print_codes
 
-from core.config import ConfigSettings
+from core.config import ConfigSettings, DEFAULT_DEVICE_LAYER_BASE
 
 from core.logger_config import setup_logger
 
@@ -77,12 +77,11 @@ class tracetool(object):
         paths_cfg = self.config.get_config().get('Paths', {})
         workdir = paths_cfg.get('replay_working_dir', '/sdcard/devlib-target')
         capture_base = paths_cfg.get('capture_root_base', '/data')
-        device_layer_base = paths_cfg.get('device_layer_base', '/data/local/debug')
         self.sdcard_working_dir = Path(workdir)
         self.capture_root_dir = Path(capture_base) / "gfxr"
         self.capture_file_fullpath = None
         self.capture_file_name = None
-        self.device_layer_debug_root = Path(device_layer_base) / "vulkan"
+        self.device_layer_debug_root = Path(DEFAULT_DEVICE_LAYER_BASE) / "vulkan"
         self.trace_setup_setprops = [dict(item) for item in self.TRACE_SETUP_SETPROPS_DEFAULTS]
         self.trace_setup_custom_setprops = []
         self._load_trace_setup_config()
