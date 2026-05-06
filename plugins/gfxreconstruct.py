@@ -82,6 +82,7 @@ class tracetool(object):
         self.capture_file_fullpath = None
         self.capture_file_name = None
         self.device_layer_debug_root = Path(DEFAULT_DEVICE_LAYER_BASE) / "vulkan"
+        self.trace_stop_handle_transfers = True
         self.trace_setup_setprops = [dict(item) for item in self.TRACE_SETUP_SETPROPS_DEFAULTS]
         self.trace_setup_custom_setprops = []
         self._load_trace_setup_config()
@@ -429,13 +430,15 @@ class tracetool(object):
                 logger.info(f"Renaming tracefile: {stdout}, moving to {self.capture_file_fullpath}")
                 self.adb.command(['mv', stdout, self.capture_file_fullpath])
             self.adb.command(['chmod', 'o+rw', self.capture_file_fullpath], True)
-            self.adb.pull(self.capture_file_fullpath, 'tmp')
-            optimized_trace = self.optimize_trace(f"tmp/{self.capture_file_name}")
-            if optimized_trace is not None:
-                self.adb.push(optimized_trace, self.sdcard_working_dir, device=None, track=False)
-                self.capture_file_name = f'{Path(self.capture_file_name).stem}.optimized.gfxr'
+            if self.trace_stop_handle_transfers:
+                self.adb.pull(self.capture_file_fullpath, 'tmp')
+                optimized_trace = self.optimize_trace(f"tmp/{self.capture_file_name}")
+                if optimized_trace is not None:
+                    self.adb.push(optimized_trace, self.sdcard_working_dir, device=None, track=False)
+                    self.capture_file_name = f'{Path(self.capture_file_name).stem}.optimized.gfxr'
+                    return self.sdcard_working_dir / self.capture_file_name
 
-        return self.sdcard_working_dir / self.capture_file_name
+        return self.capture_file_fullpath
 
     def optimize_trace(self, trace):
         """

@@ -62,6 +62,40 @@ class WorkerAdbProcess(QObject):
         self._running = False
 
 
+class TraceStopWorker(QObject):
+    finished = Signal(bool, object)
+
+    def __init__(self, plugin, app):
+        super().__init__()
+        self.plugin = plugin
+        self.app = app
+
+    def run(self):
+        try:
+            remote_path_to_trace = self.plugin.trace_stop(self.app)
+            self.finished.emit(True, remote_path_to_trace)
+        except Exception as exc:
+            logger.exception(f"Failed to stop trace for '{self.app}'")
+            self.finished.emit(False, exc)
+
+
+class OptimizeTraceWorker(QObject):
+    finished = Signal(bool, object)
+
+    def __init__(self, plugin, local_trace_path):
+        super().__init__()
+        self.plugin = plugin
+        self.local_trace_path = str(local_trace_path)
+
+    def run(self):
+        try:
+            optimized_trace = self.plugin.optimize_trace(self.local_trace_path)
+            self.finished.emit(True, optimized_trace)
+        except Exception as exc:
+            logger.exception(f"Failed to optimize trace '{self.local_trace_path}'")
+            self.finished.emit(False, exc)
+
+
 class UiTraceWidget(PageNavigation):
     goback_signal = Signal()
     replay_signal = Signal()
@@ -105,6 +139,12 @@ class UiTraceWidget(PageNavigation):
         self.start_application_button = None
         self.adbWorker = None
         self.adbThread = None
+        self._trace_stop_worker = None
+        self._trace_stop_thread = None
+        self._optimize_trace_worker = None
+        self._optimize_trace_thread = None
+        self._gfxr_remote_trace_path = None
+        self._gfxr_local_trace_path = None
 
     def _is_qt_object_valid(self, obj):
         return obj is not None and isValid(obj)
@@ -112,6 +152,50 @@ class UiTraceWidget(PageNavigation):
     def _stop_adb_worker(self):
         if self._is_qt_object_valid(self.adbWorker):
             self.adbWorker.stop()
+
+    def _reset_trace_stop_state(self):
+        self._trace_stop_worker = None
+        self._trace_stop_thread = None
+
+    def _reset_optimize_trace_state(self):
+        self._optimize_trace_worker = None
+        self._optimize_trace_thread = None
+
+    def _start_trace_stop_worker(self):
+        if self._trace_stop_thread and self._trace_stop_thread.isRunning():
+            logger.info("Trace stop already in progress, skipping duplicate request")
+            return
+
+        plugin = self.plugins[self.currentTool]
+        if self.currentTool == "gfxreconstruct" and hasattr(plugin, "trace_stop_handle_transfers"):
+            plugin.trace_stop_handle_transfers = False
+
+        self._trace_stop_worker = TraceStopWorker(plugin, self.currentApp)
+        self._trace_stop_thread = QThread()
+        self._trace_stop_worker.moveToThread(self._trace_stop_thread)
+        self._trace_stop_thread.started.connect(self._trace_stop_worker.run)
+        self._trace_stop_worker.finished.connect(self._on_trace_stop_finished)
+        self._trace_stop_worker.finished.connect(self._trace_stop_thread.quit)
+        self._trace_stop_worker.finished.connect(self._trace_stop_worker.deleteLater)
+        self._trace_stop_thread.finished.connect(self._trace_stop_thread.deleteLater)
+        self._trace_stop_thread.finished.connect(self._reset_trace_stop_state)
+        self._trace_stop_thread.start()
+
+    def _start_optimize_trace_worker(self, local_trace_path):
+        if self._optimize_trace_thread and self._optimize_trace_thread.isRunning():
+            logger.info("Trace optimization already in progress, skipping duplicate request")
+            return
+
+        self._optimize_trace_worker = OptimizeTraceWorker(self.plugins[self.currentTool], local_trace_path)
+        self._optimize_trace_thread = QThread()
+        self._optimize_trace_worker.moveToThread(self._optimize_trace_thread)
+        self._optimize_trace_thread.started.connect(self._optimize_trace_worker.run)
+        self._optimize_trace_worker.finished.connect(self._on_optimize_trace_finished)
+        self._optimize_trace_worker.finished.connect(self._optimize_trace_thread.quit)
+        self._optimize_trace_worker.finished.connect(self._optimize_trace_worker.deleteLater)
+        self._optimize_trace_thread.finished.connect(self._optimize_trace_thread.deleteLater)
+        self._optimize_trace_thread.finished.connect(self._reset_optimize_trace_state)
+        self._optimize_trace_thread.start()
 
     def setManualTracing(self, state):
         """
@@ -713,6 +797,28 @@ class UiTraceWidget(PageNavigation):
         if self.currentTool == "gfxreconstruct" and self.manual_tracing:
             begin_trace_button.hide()
 
+    def _set_trace_status_message(self, message):
+        if not self._is_qt_object_valid(self.app_start_widget):
+            return
+        status_label = self.app_start_widget.findChild(QLabel, "start label")
+        if self._is_qt_object_valid(status_label):
+            status_label.setText(message)
+            QApplication.processEvents()
+
+    def _transfer_trace_with_progress(self, title, file_path, destination_path, action, track=False):
+        helper = AdbThread()
+        cancelled, success = helper.run_with_progress(
+            parent=self,
+            title=title,
+            adb=self.adb,
+            file=file_path,
+            path=destination_path,
+            track=track,
+            action=action,
+            on_cancel=lambda: None,
+        )
+        return cancelled, success
+
     def beginTrace(self):
         """
         Start the tracing manually
@@ -730,83 +836,146 @@ class UiTraceWidget(PageNavigation):
         if self.plugins[self.currentTool].trace_setup_check(self.currentApp) and self.currentAppStarted:
             self.updatePage()
             QApplication.processEvents()
-            remote_path_to_trace = self.plugins[self.currentTool].trace_stop(self.currentApp)
-            # Page nr 2: After trace stop page
-            self.end_trace_widget = QWidget()
-
-            self.currentTrace = remote_path_to_trace
-            _, ls_error = self.adb.command(['ls', remote_path_to_trace], run_with_sudo=False)
-            if ls_error:
-                error_lower = ls_error.lower()
-                if "permission denied" in error_lower:
-                    logger.warning(f"Permission denied when accessing trace at: {remote_path_to_trace}")
-                    extra_lines = [
-                        "Trace created but failed to access the trace file on the device.",
-                        f"Path: {remote_path_to_trace}",
-                        "\n"
-                        "Suggestions: Ensure the trace directory is readable or try fetching the trace manually"
-                    ]
-                    self._handleFailed(extra_lines=extra_lines)
-                else:
-                    logger.warning(f"No output trace file found at: {remote_path_to_trace}. Tracing probably failed. Error: {ls_error}")
-                    self._handleFailed(extra_lines=[f"Could not find trace file at: {remote_path_to_trace}"])
-                return
-            else:
-                logger.info(f"Created trace file at: {remote_path_to_trace}")
-                app_end_label = QLabel(f"Trace file created at: {self.currentTrace}")
-                downloading_label = QLabel("")
-                downloading_label.setObjectName("downloading")
-
-            logger.debug(f"Reset device after tracing with '{self.currentTool}'")
-            self.plugins[self.currentTool].trace_reset_device()
-
-            app_end_label.setAlignment(Qt.AlignCenter)
-            downloading_label.setAlignment(Qt.AlignCenter)
-            abort_tracing = QPushButton("Cancel")
-            abort_tracing.setFixedWidth(400)
-            self.widgetStyleSheet(abort_tracing, color="orangered", font_size="16px", selector="QPushButton")
-            retry_tracing_button = QPushButton("Redo Capture")
-            retry_tracing_button.setFixedWidth(400)
-            self.widgetStyleSheet(retry_tracing_button, color="lightgray", font_size="16px", selector="QPushButton")
-            download_trace_button = QPushButton("Download trace")
-            download_trace_button.setFixedWidth(400)
-            self.widgetStyleSheet(download_trace_button, color="lightgray", font_size="16px", selector="QPushButton")
-            start_replay_button = QPushButton("Continue")
-            start_replay_button.setFixedWidth(400)
-            self.widgetStyleSheet(start_replay_button, color="limegreen", font_size="16px", selector="QPushButton")
-            start_replay_button.clicked.connect(self.startReplay)
-            retry_tracing_button.clicked.connect(self.appstart)
-            abort_tracing.clicked.connect(self.goback)
-            # TODO: Placeholder for downloading trace to local directory
-            download_trace_button.clicked.connect(self.downloadTrace)
-            top_button_layout = QHBoxLayout()
-            top_button_layout.addStretch()
-            top_button_layout.addWidget(retry_tracing_button)
-            top_button_layout.addWidget(download_trace_button)
-            top_button_layout.addStretch()
-
-            bottom_button_layout = QHBoxLayout()
-            bottom_button_layout.addStretch()
-            bottom_button_layout.addWidget(abort_tracing)
-            bottom_button_layout.addWidget(start_replay_button)
-            bottom_button_layout.addStretch()
-
-            button_layout = QVBoxLayout()
-            button_layout.addLayout(top_button_layout)
-            button_layout.addLayout(bottom_button_layout)
-
-            self.endTrace_layout = QVBoxLayout()
-            self.endTrace_layout.addWidget(app_end_label)
-            self.endTrace_layout.addWidget(downloading_label)
-            self.endTrace_layout.addLayout(button_layout)
-
-            self.app_end_widget = QWidget()
-            self.app_end_widget.setLayout(self.endTrace_layout)
-            self.nestedStack.insertWidget(3, self.app_end_widget)
-            self.nestedStack.setCurrentIndex(3)
+            self._start_trace_stop_worker()
 
         else:
             self._handleFailed()
+
+    def _on_trace_stop_finished(self, success, result):
+        if not success:
+            self._handleFailed(extra_lines=[str(result)])
+            return
+
+        remote_path_to_trace = result
+        if self.currentTool == "gfxreconstruct":
+            self._finalize_gfxreconstruct_trace(remote_path_to_trace)
+            return
+
+        self._show_end_trace_page(remote_path_to_trace)
+
+    def _finalize_gfxreconstruct_trace(self, remote_path_to_trace):
+        self._gfxr_remote_trace_path = Path(remote_path_to_trace)
+        self._gfxr_local_trace_path = Path("tmp") / self._gfxr_remote_trace_path.name
+        self._set_trace_status_message("Tracing has stopped.\n\nDownloading trace. Please wait...")
+        cancelled, success = self._transfer_trace_with_progress(
+            title="Downloading trace...",
+            file_path=str(self._gfxr_remote_trace_path),
+            destination_path="tmp",
+            action="pull",
+        )
+        if cancelled:
+            self._handleFailed(extra_lines=["Trace download was cancelled."])
+            return
+        if not success:
+            self._handleFailed(extra_lines=["Trace download failed."])
+            return
+
+        self._set_trace_status_message("Tracing has stopped.\n\nOptimizing trace locally. Please wait...")
+        self._start_optimize_trace_worker(self._gfxr_local_trace_path)
+
+    def _on_optimize_trace_finished(self, success, result):
+        if not self._gfxr_local_trace_path:
+            self._handleFailed(extra_lines=["Trace optimization finished without a local trace path."])
+            return
+
+        local_trace_to_push = self._gfxr_local_trace_path
+        if success and result:
+            local_trace_to_push = Path(result)
+        elif not success:
+            logger.warning(f"Trace optimization failed, using unoptimized trace: {result}")
+        else:
+            logger.warning("Trace optimization did not produce an optimized trace, using unoptimized trace")
+
+        self._set_trace_status_message("Tracing has stopped.\n\nUploading trace back to device. Please wait...")
+        cancelled, push_success = self._transfer_trace_with_progress(
+            title="Uploading trace...",
+            file_path=str(local_trace_to_push),
+            destination_path=str(self.replay_working_dir),
+            action="push",
+        )
+        if cancelled:
+            self._handleFailed(extra_lines=["Trace upload was cancelled."])
+            return
+        if not push_success:
+            self._handleFailed(extra_lines=["Trace upload failed."])
+            return
+
+        self._show_end_trace_page(self.replay_working_dir / local_trace_to_push.name)
+
+    def _show_end_trace_page(self, remote_path_to_trace):
+        # Page nr 2: After trace stop page
+        self.end_trace_widget = QWidget()
+
+        self.currentTrace = remote_path_to_trace
+        _, ls_error = self.adb.command(['ls', remote_path_to_trace], run_with_sudo=False)
+        if ls_error:
+            error_lower = ls_error.lower()
+            if "permission denied" in error_lower:
+                logger.warning(f"Permission denied when accessing trace at: {remote_path_to_trace}")
+                extra_lines = [
+                    "Trace created but failed to access the trace file on the device.",
+                    f"Path: {remote_path_to_trace}",
+                    "\n"
+                    "Suggestions: Ensure the trace directory is readable or try fetching the trace manually"
+                ]
+                self._handleFailed(extra_lines=extra_lines)
+            else:
+                logger.warning(f"No output trace file found at: {remote_path_to_trace}. Tracing probably failed. Error: {ls_error}")
+                self._handleFailed(extra_lines=[f"Could not find trace file at: {remote_path_to_trace}"])
+            return
+        else:
+            logger.info(f"Created trace file at: {remote_path_to_trace}")
+            app_end_label = QLabel(f"Trace file created at: {self.currentTrace}")
+            downloading_label = QLabel("")
+            downloading_label.setObjectName("downloading")
+
+        logger.debug(f"Reset device after tracing with '{self.currentTool}'")
+        self.plugins[self.currentTool].trace_reset_device()
+
+        app_end_label.setAlignment(Qt.AlignCenter)
+        downloading_label.setAlignment(Qt.AlignCenter)
+        abort_tracing = QPushButton("Cancel")
+        abort_tracing.setFixedWidth(400)
+        self.widgetStyleSheet(abort_tracing, color="orangered", font_size="16px", selector="QPushButton")
+        retry_tracing_button = QPushButton("Redo Capture")
+        retry_tracing_button.setFixedWidth(400)
+        self.widgetStyleSheet(retry_tracing_button, color="lightgray", font_size="16px", selector="QPushButton")
+        download_trace_button = QPushButton("Download trace")
+        download_trace_button.setFixedWidth(400)
+        self.widgetStyleSheet(download_trace_button, color="lightgray", font_size="16px", selector="QPushButton")
+        start_replay_button = QPushButton("Continue")
+        start_replay_button.setFixedWidth(400)
+        self.widgetStyleSheet(start_replay_button, color="limegreen", font_size="16px", selector="QPushButton")
+        start_replay_button.clicked.connect(self.startReplay)
+        retry_tracing_button.clicked.connect(self.appstart)
+        abort_tracing.clicked.connect(self.goback)
+        # TODO: Placeholder for downloading trace to local directory
+        download_trace_button.clicked.connect(self.downloadTrace)
+        top_button_layout = QHBoxLayout()
+        top_button_layout.addStretch()
+        top_button_layout.addWidget(retry_tracing_button)
+        top_button_layout.addWidget(download_trace_button)
+        top_button_layout.addStretch()
+
+        bottom_button_layout = QHBoxLayout()
+        bottom_button_layout.addStretch()
+        bottom_button_layout.addWidget(abort_tracing)
+        bottom_button_layout.addWidget(start_replay_button)
+        bottom_button_layout.addStretch()
+
+        button_layout = QVBoxLayout()
+        button_layout.addLayout(top_button_layout)
+        button_layout.addLayout(bottom_button_layout)
+
+        self.endTrace_layout = QVBoxLayout()
+        self.endTrace_layout.addWidget(app_end_label)
+        self.endTrace_layout.addWidget(downloading_label)
+        self.endTrace_layout.addLayout(button_layout)
+
+        self.app_end_widget = QWidget()
+        self.app_end_widget.setLayout(self.endTrace_layout)
+        self.nestedStack.insertWidget(3, self.app_end_widget)
+        self.nestedStack.setCurrentIndex(3)
 
     def _handleFailed(self, extra_lines=[]):
         """
