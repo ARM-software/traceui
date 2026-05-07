@@ -290,6 +290,8 @@ class tracetool(object):
         """
         assert self.adb.device, 'No device selected'
 
+        self.adb.reset_props_by_grep('debug.gfxrecon')
+
         # chack that the package/app exists
         device_layer_path = self.__get_device_package_layer_path(app)
 

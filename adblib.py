@@ -276,10 +276,20 @@ class adb(object):
         assert device in self.devices
         self.device = device
 
-    def getprop(self, prop, device=None):
-        """Runs adb sell getprop"""
+    def getprop(self, prop=None, device=None, grep_term=None):
+        """Querries getprop using either a specific property or a grep term"""
         device = self.__check_device(device)
-        stdout, stderr = self.command(['getprop', prop], False, device)
+        stdout = ""
+        if prop:
+            stdout, stderr = self.command(['getprop', prop], False, device)
+        elif grep_term:
+            stdout, stderr = self.command(
+                [f"getprop | grep {grep_term}"],
+                False,
+                device,
+                errors_handled_externally=True,
+                print_command=False,
+            )
         return stdout
 
     def setprop(self, prop, value, device=None):
@@ -287,7 +297,24 @@ class adb(object):
         device = self.__check_device(device)
         if not prop in self.restore_props:
             self.restore_props[prop] = self.getprop(prop, device)
+        if value == '':
+            self.command([f"setprop {prop} ''"], False, device)
+            return
         self.command(['setprop', prop, value], False, device)
+
+    def reset_props_by_grep(self, grep_term, device=None):
+        """Clears properties matching grep_term and tracks prior values for restoration."""
+        device = self.__check_device(device)
+        stdout = self.getprop(device=device, grep_term=grep_term)
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line.startswith("["):
+                continue
+            prop = line[1:].split("]:", 1)[0]
+            if not prop:
+                continue
+            logger.info(f"Resetting stale property: {prop}")
+            self.setprop(prop, '', device)
 
     # def setting(self, key, value): # TBD
 
