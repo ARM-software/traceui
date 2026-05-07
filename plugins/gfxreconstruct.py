@@ -552,7 +552,7 @@ class tracetool(object):
                 # replayer produces .bmp - should be converted to .png
 
             if to_frame:
-                cmd.extend([f'--quit-after-frame {to_frame}'])
+                cmd.extend([f'--quit-after-frame {to_frame+1}'])
 
             if hwc:
                 try:
