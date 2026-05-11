@@ -1,0 +1,572 @@
+#!/usr/bin/python3
+
+import argparse
+import importlib
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import adblib
+
+from core.logger_config import LOG_LEVEL_ENV, setup_logger
+
+
+logger = setup_logger("traceui_cli")
+
+REPO_ROOT = Path(__file__).resolve().parent
+PLUGINS_PATH = REPO_ROOT / "plugins"
+DEFAULT_SESSION_FILE = REPO_ROOT / "tmp" / "traceui_cli_capture_session.json"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "tmp"
+CAPTURE_PLUGIN_CHOICES = ("gfxreconstruct", "patrace")
+
+
+class CLIError(RuntimeError):
+    """Expected user-facing CLI error."""
+
+
+def _print(message):
+    print(message, flush=True)
+
+
+def configure_command_loglevel(loglevel):
+    global logger
+    if not loglevel:
+        return
+    os.environ[LOG_LEVEL_ENV] = loglevel.upper()
+    logger = setup_logger("traceui_cli")
+
+
+def _ensure_dir(path):
+    Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def init_adb(device=None):
+    adb = adblib.adb()
+    devices = adb.init()
+    if not devices:
+        raise CLIError("No connected Android devices found.")
+    if device:
+        adb.select_device(device)
+    elif adb.device is None:
+        if len(adb.devices) > 1:
+            raise CLIError(
+                "Multiple devices connected. Use --device SERIAL to choose one."
+            )
+        adb.select_device(adb.devices[0])
+    return adb
+
+
+def load_plugins(adb):
+    plugins = {}
+    sys.path.insert(0, str(PLUGINS_PATH))
+    try:
+        for entry in os.listdir(PLUGINS_PATH):
+            filename, ext = os.path.splitext(entry)
+            if ext != ".py":
+                continue
+            module = importlib.import_module(filename)
+            plugin = module.tracetool(adb)
+            plugins[plugin.plugin_name] = plugin
+    finally:
+        sys.path.pop(0)
+    return plugins
+
+
+def build_capture_sample_config(plugins):
+    sample_config = {
+        "devicepaths": {},
+        "plugin": {},
+    }
+
+    for plugin_name in sorted(plugins.keys()):
+        plugin = plugins[plugin_name]
+        if not hasattr(plugin, "get_capture_config_template"):
+            continue
+
+        template = plugin.get_capture_config_template()
+        if not isinstance(template, dict):
+            raise CLIError(f"Plugin '{plugin.plugin_name}' returned an invalid capture config template.")
+
+        template_devicepaths = template.get("devicepaths", {})
+        if not isinstance(template_devicepaths, dict):
+            raise CLIError(f"Plugin '{plugin.plugin_name}' returned invalid devicepaths in capture config template.")
+        for key, value in template_devicepaths.items():
+            if key not in sample_config["devicepaths"]:
+                sample_config["devicepaths"][key] = value
+
+        template_plugins = template.get("plugin", {})
+        if not isinstance(template_plugins, dict):
+            raise CLIError(f"Plugin '{plugin.plugin_name}' returned an invalid plugin section in capture config template.")
+        sample_config["plugin"].update(template_plugins)
+
+    if not sample_config["plugin"]:
+        raise CLIError("No plugins expose a capture config template.")
+
+    return sample_config
+
+
+def resolve_plugin(plugins, plugin_name=None, trace_path=None):
+    if plugin_name and plugin_name != "auto":
+        if plugin_name not in plugins:
+            raise CLIError(f"Unknown plugin '{plugin_name}'. Available: {sorted(plugins.keys())}")
+        return plugins[plugin_name]
+
+    if trace_path is None:
+        raise CLIError("A trace path is required when plugin is set to auto.")
+
+    suffix = Path(trace_path).suffix.lstrip(".")
+    matches = [plugin for plugin in plugins.values() if getattr(plugin, "suffix", None) == suffix]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise CLIError(f"No plugin found for trace suffix '.{suffix}'.")
+    raise CLIError(f"Multiple plugins matched trace suffix '.{suffix}'.")
+
+
+def _extract_application_label(adb, package_name):
+    info, _ = adb.command(["dumpsys", "package", package_name], errors_handled_externally=True, print_command=False)
+    for line in info.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("application-label:"):
+            return stripped.split(":", 1)[1].strip().strip("'")
+        if stripped.startswith("application-label-"):
+            return stripped.split(":", 1)[1].strip().strip("'")
+    return None
+
+
+def resolve_target_app(adb, target):
+    target = target.strip()
+    apps = adb.apps()
+
+    exact_package_matches = [app["name"] for app in apps if app["name"] == target]
+    if len(exact_package_matches) == 1:
+        return exact_package_matches[0]
+
+    package_matches = [app["name"] for app in apps if target.lower() in app["name"].lower()]
+    if len(package_matches) == 1:
+        return package_matches[0]
+
+    label_matches = []
+    for app in apps:
+        label = _extract_application_label(adb, app["name"])
+        if not label:
+            continue
+        if label.lower() == target.lower() or target.lower() in label.lower():
+            label_matches.append((app["name"], label))
+
+    if len(label_matches) == 1:
+        return label_matches[0][0]
+
+    candidates = package_matches if package_matches else [match[0] for match in label_matches]
+    preview = ", ".join(sorted(candidates)[:10]) if candidates else "none"
+    raise CLIError(
+        f"Could not uniquely resolve target '{target}'. Candidate packages: {preview}"
+    )
+
+
+def list_installed_packages(adb):
+    stdout, _ = adb.command(["cmd", "package", "list", "packages"], errors_handled_externally=True)
+    packages = []
+    for line in stdout.splitlines():
+        if line.startswith("package:"):
+            packages.append(line.split(":", 1)[1].strip())
+    return sorted(packages)
+
+
+def launch_target_app(adb, package_name):
+    adb.command(
+        ["monkey", "-p", package_name, "-c", "android.intent.category.LAUNCHER", "1"],
+        errors_handled_externally=True,
+    )
+
+
+def _print_error_lines(header, err_lines):
+    if not err_lines:
+        return
+    _print(header)
+    for line in err_lines:
+        _print(f"  {line}")
+
+
+def _parse_plugin_logcat(plugin, mode, app=None):
+    if not hasattr(plugin, "parse_logcat"):
+        return []
+    return plugin.parse_logcat(mode=mode, app=app)
+
+
+def _raise_capture_failure(plugin, app, fallback_message):
+    err_lines = _parse_plugin_logcat(plugin, mode="trace", app=app)
+    _print_error_lines("Trace log warnings/errors:", err_lines)
+    if err_lines:
+        raise CLIError("Tracing was not succesful")
+    raise CLIError(fallback_message)
+
+
+def _ensure_capture_trace_exists(adb, plugin, app, remote_trace):
+    if remote_trace is None:
+        _raise_capture_failure(plugin, app, "No trace was captured. Try a different plugin.")
+
+    _, ls_error = adb.command(["ls", str(remote_trace)], errors_handled_externally=True)
+    if ls_error:
+        _raise_capture_failure(plugin, app, "No trace was captured. Try a different plugin.")
+
+
+def apply_plugin_config(plugin, config_path):
+    if not hasattr(plugin, "load_capture_config"):
+        raise CLIError(f"Plugin '{plugin.plugin_name}' does not support config files.")
+    try:
+        plugin.load_capture_config(config_path)
+    except FileNotFoundError:
+        raise CLIError(f"Config file not found: {config_path}")
+    except ValueError as exc:
+        raise CLIError(f"Invalid config file: {exc}")
+
+
+def save_capture_session(session_path, data):
+    session_path = Path(session_path)
+    _ensure_dir(session_path.parent)
+    with open(session_path, "w") as outfile:
+        json.dump(data, outfile, indent=2)
+
+
+def load_capture_session(session_path):
+    session_path = Path(session_path)
+    if not session_path.is_file():
+        raise CLIError(f"Capture session file not found: {session_path}")
+    with open(session_path, "r") as infile:
+        return json.load(infile)
+
+
+def remove_capture_session(session_path):
+    session_path = Path(session_path)
+    if session_path.exists():
+        session_path.unlink()
+
+
+def write_patrace_replay_args(adb, plugin, data):
+    _ensure_dir(DEFAULT_OUTPUT_DIR)
+    local_args_path = DEFAULT_OUTPUT_DIR / "replay_args.json"
+    with open(local_args_path, "w") as outfile:
+        json.dump(data, outfile, indent=2)
+    adb.command(["mkdir", "-p", str(plugin.sdcard_working_dir)], True)
+    adb.delete_file(plugin.sdcard_working_dir / local_args_path.name)
+    if not adb.push(str(local_args_path), str(plugin.sdcard_working_dir), track=False):
+        raise CLIError("Failed to push patrace replay_args.json to device.")
+
+
+def start_replay_process(adb, plugin, cmd):
+    process_name = plugin.replayer["name"]
+    if "gfxreconstruct" in process_name:
+        logger.debug("Launching replay command: %s", " ".join([str(x) for x in cmd]))
+        subprocess.run(" ".join([str(x) for x in cmd]), shell=True, capture_output=False)
+    else:
+        adb.command(cmd)
+        logger.debug("Launching replay command: %s", cmd)
+
+    time.sleep(0.1)
+    stdout, _ = adb.command([f"ps -A | grep {process_name}"], print_command=False)
+    while process_name in stdout:
+        time.sleep(0.5)
+        stdout, _ = adb.command([f"ps -A | grep {process_name}"], print_command=False)
+
+
+def _get_screenshot_paths(adb, base_dir, prefix):
+    paths, _ = adb.command([f"ls {base_dir} | grep {prefix}"], errors_handled_externally=True)
+    if not paths:
+        return []
+    return [f"{base_dir}/{item}" for item in paths.split()]
+
+
+def collect_replay_outputs(adb, plugin, trace_on_device, screenshots, interval, outdir):
+    results = {"screenshots": []}
+    outdir = Path(outdir)
+    _ensure_dir(outdir)
+
+    if screenshots:
+        dir_prefix = f"{Path(trace_on_device).stem}_screenshot"
+        screenshot_dir = plugin.sdcard_working_dir / dir_prefix
+        screenshot_prefix = f"{dir_prefix}_frame_"
+        screenshot_paths = _get_screenshot_paths(adb, screenshot_dir, screenshot_prefix)
+        if plugin.plugin_name == "patrace":
+            for remote_path in screenshot_paths:
+                frame_num = remote_path.split("frame_")[-1].split("_")[0]
+                adb.command([f"mv {remote_path} {screenshot_dir}/{screenshot_prefix}{int(frame_num)}.png"], True)
+            screenshot_paths = _get_screenshot_paths(adb, screenshot_dir, screenshot_prefix)
+        for remote_path in screenshot_paths:
+            if not adb.pull(remote_path, str(outdir)):
+                raise CLIError(f"Failed to pull screenshot from device: {remote_path}")
+            results["screenshots"].append(str(outdir / Path(remote_path).name))
+
+    return results
+
+
+def handle_capture_setup(args):
+    configure_command_loglevel(args.loglevel)
+    adb = init_adb(args.device)
+    plugins = load_plugins(adb)
+    plugin = resolve_plugin(plugins, args.plugin)
+    plugin.adb = adb
+
+    if args.config:
+        apply_plugin_config(plugin, args.config)
+
+    resolved_target = resolve_target_app(adb, args.app)
+    _print(f"Using device: {adb.device}")
+    _print(f"Using plugin: {plugin.plugin_name}")
+    _print(f"Resolved target: {resolved_target}")
+
+    adb.clear_logcat()
+    plugin.trace_setup_device(resolved_target)
+    if hasattr(plugin, "trace_setup_check") and not plugin.trace_setup_check(resolved_target):
+        raise CLIError("Trace setup failed. Check if device is rooted.")
+
+    session_data = {
+        "plugin": plugin.plugin_name,
+        "device": adb.device,
+        "resolved_target": resolved_target,
+        "requested_app": args.app,
+        "config_path": str(args.config) if args.config else None,
+        "pull_to": str(DEFAULT_OUTPUT_DIR),
+        "plugin_state": plugin.export_capture_session_state() if hasattr(plugin, "export_capture_session_state") else {},
+    }
+    save_capture_session(args.state_file, session_data)
+    _print(f"Capture armed. Session stored at: {args.state_file}")
+    if args.launch_app:
+        launch_target_app(adb, resolved_target)
+        _print(f"Started target app: {resolved_target}")
+    else:
+        _print("Launch the target app manually, then run capture stop to fetch the trace.")
+    return 0
+
+
+def handle_capture_stop(args):
+    session = load_capture_session(args.state_file)
+    session_plugin = session.get("plugin")
+    if not session_plugin:
+        raise CLIError("Capture session is missing the plugin name.")
+
+    adb = init_adb(args.device)
+    plugins = load_plugins(adb)
+    plugin = resolve_plugin(plugins, session_plugin)
+    plugin.adb = adb
+
+    if session.get("device") and session["device"] != adb.device:
+        raise CLIError(
+            f"Session device '{session['device']}' does not match active device '{adb.device}'."
+        )
+
+    resolved_target = session["resolved_target"]
+    if args.app:
+        requested_target = resolve_target_app(adb, args.app)
+        if requested_target != resolved_target:
+            raise CLIError(
+                f"Resolved target '{requested_target}' does not match session target '{resolved_target}'."
+            )
+
+    if hasattr(plugin, "import_capture_session_state"):
+        plugin.import_capture_session_state(session.get("plugin_state", {}))
+
+    pull_to = Path(args.pull_to or session.get("pull_to") or DEFAULT_OUTPUT_DIR)
+    _ensure_dir(pull_to)
+    _print(f"Stopping capture for: {resolved_target}")
+
+    remote_trace = None
+    try:
+        remote_trace = plugin.trace_stop(resolved_target)
+        _ensure_capture_trace_exists(adb, plugin, resolved_target, remote_trace)
+        if not adb.pull(str(remote_trace), str(pull_to)):
+            raise CLIError(f"Failed to pull trace from device: {remote_trace}")
+    finally:
+        plugin.trace_reset_device()
+
+    local_path = pull_to / Path(remote_trace).name
+    remove_capture_session(args.state_file)
+    _print(f"Trace pulled to: {local_path}")
+
+    return 0
+
+
+def handle_capture_list_packages(args):
+    adb = init_adb(args.device)
+    packages = list_installed_packages(adb)
+    for package in packages:
+        _print(package)
+    return 0
+
+
+def handle_capture_sample_config(args):
+    plugins = load_plugins(None)
+    sample_config = build_capture_sample_config(plugins)
+    sample_json = json.dumps(sample_config, indent=2)
+
+    if args.output:
+        output_path = Path(args.output)
+        _ensure_dir(output_path.parent)
+        output_path.write_text(sample_json + "\n")
+        _print(f"Wrote sample config to: {output_path}")
+    else:
+        _print(sample_json)
+
+    return 0
+
+
+def handle_replay(args):
+    configure_command_loglevel(args.loglevel)
+    adb = init_adb(args.device)
+    plugins = load_plugins(adb)
+    trace_path = Path(args.trace)
+    if not trace_path.is_file():
+        raise CLIError(f"Trace file not found: {trace_path}")
+    if trace_path.stat().st_size == 0:
+        raise CLIError(f"Trace file is empty: {trace_path}")
+
+    plugin = resolve_plugin(plugins, args.plugin, trace_path)
+    plugin.adb = adb
+    if args.config:
+        apply_plugin_config(plugin, args.config)
+    outdir = Path(args.outdir or DEFAULT_OUTPUT_DIR)
+    _ensure_dir(outdir)
+    if args.interval < 0:
+        raise CLIError("Screenshot interval must be >= 0.")
+
+    remote_trace = plugin.sdcard_working_dir / trace_path.name
+    adb.command(["mkdir", "-p", str(plugin.sdcard_working_dir)], True)
+    adb.delete_file(remote_trace)
+    if not adb.push(str(trace_path), str(plugin.sdcard_working_dir), track=False):
+        raise CLIError(f"Failed to push trace to device: {trace_path}")
+
+    _print(f"Using device: {adb.device}")
+    _print(f"Using plugin: {plugin.plugin_name}")
+    _print(f"Trace on device: {remote_trace}")
+
+    adb.clear_logcat()
+    plugin.replay_setup()
+    screenshots_mode = "interval" if args.screenshots else False
+    cmd, data = plugin.replay_start(
+        remote_trace,
+        screenshot=screenshots_mode,
+        interval=args.interval,
+        extra_args=list(getattr(plugin, "extra_args", [])),
+    )
+    if cmd is None:
+        raise CLIError("Replay setup failed before launching replay.")
+
+    if plugin.plugin_name == "patrace":
+        write_patrace_replay_args(adb, plugin, data)
+
+    try:
+        start_replay_process(adb, plugin, cmd)
+        results = collect_replay_outputs(adb, plugin, remote_trace, args.screenshots, args.interval, outdir)
+        err_lines = plugin.parse_logcat(mode="replay")
+    finally:
+        plugin.replay_reset_device()
+
+    if results["screenshots"]:
+        _print(f"Pulled {len(results['screenshots'])} screenshot(s) to: {outdir}")
+    else:
+        _print("Replay finished.")
+
+    if err_lines:
+        _print_error_lines("Replay reported errors:", err_lines)
+        return 1
+
+    return 0
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="traceui-cli")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    capture_parser = subparsers.add_parser("capture")
+    capture_subparsers = capture_parser.add_subparsers(dest="capture_command", required=True)
+
+    capture_setup = capture_subparsers.add_parser("setup")
+    capture_setup.add_argument(
+        "--plugin",
+        required=True,
+        choices=CAPTURE_PLUGIN_CHOICES,
+        help="Capture plugin."
+    )
+    capture_setup.add_argument("--app", required=True, help="Target Android package or app name.")
+    capture_setup.add_argument("-c", "--config", type=Path, help="Plugin-scoped capture config JSON.")
+    capture_setup.add_argument("--device", help="ADB device serial.")
+    capture_setup.add_argument(
+        "--loglevel",
+        choices=("debug", "info", "warning", "error", "critical"),
+        help="Override CLI/plugin log level for this command.",
+    )
+    capture_setup.add_argument(
+        "--launch-app",
+        action="store_true",
+        help="Launch the target app after capture setup completes.",
+    )
+    capture_setup.add_argument(
+        "--state-file",
+        type=Path,
+        default=DEFAULT_SESSION_FILE,
+        help="Path to the capture session state file shared between setup and stop.",
+    )
+    capture_setup.set_defaults(handler=handle_capture_setup)
+
+    capture_stop = capture_subparsers.add_parser("stop")
+    capture_stop.add_argument("--app", help="Optional package or app name for validation.")
+    capture_stop.add_argument("--device", help="ADB device serial.")
+    capture_stop.add_argument("--pull-to", type=Path, default=DEFAULT_OUTPUT_DIR)
+    capture_stop.add_argument(
+        "--state-file",
+        type=Path,
+        default=DEFAULT_SESSION_FILE,
+        help="Path to the capture session state file created by capture setup.",
+    )
+    capture_stop.set_defaults(handler=handle_capture_stop)
+
+    capture_list_packages = capture_subparsers.add_parser("list-packages")
+    capture_list_packages.add_argument("--device", help="ADB device serial.")
+    capture_list_packages.set_defaults(handler=handle_capture_list_packages)
+
+    capture_sample_config = capture_subparsers.add_parser("sample-config")
+    capture_sample_config.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        help="Optional path to write the sample config JSON.",
+    )
+    capture_sample_config.set_defaults(handler=handle_capture_sample_config)
+
+    replay_parser = subparsers.add_parser("replay")
+    replay_parser.add_argument("-t", "--trace", required=True, type=Path, help="Local trace path.")
+    replay_parser.add_argument("--plugin", default="auto", help="Plugin name or 'auto'.")
+    replay_parser.add_argument("--device", help="ADB device serial.")
+    replay_parser.add_argument("-c", "--config", type=Path, help="Config JSON used to override device paths.")
+    replay_parser.add_argument(
+        "--loglevel",
+        choices=("debug", "info", "warning", "error", "critical"),
+        help="Override CLI/plugin log level for this command.",
+    )
+    replay_parser.add_argument("--screenshots", action="store_true", help="Capture screenshots during replay.")
+    replay_parser.add_argument("--interval", type=int, default=10, help="Screenshot interval; 0 disables capture within screenshot mode.")
+    replay_parser.add_argument("-o", "--outdir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Local output directory.")
+    replay_parser.set_defaults(handler=handle_replay)
+
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.handler(args)
+    except CLIError as exc:
+        _print(f"ERROR: {exc}")
+        return 1
+    except Exception as exc:
+        logger.exception("CLI command failed")
+        _print(f"ERROR: {exc}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
