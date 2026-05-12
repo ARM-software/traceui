@@ -52,10 +52,16 @@ python traceui.py
 
 ## Running The CLI
 
-The CLI entry point is:
+Install the repository into your current environment in editable mode:
 
 ```bash
-python traceui_cli.py
+python -m pip install -e .
+```
+
+This installs the `traceui_cli` console script into the active environment. After that, the CLI entry point is:
+
+```bash
+traceui_cli
 ```
 
 ### Capture Commands
@@ -63,22 +69,22 @@ python traceui_cli.py
 List installed Android packages:
 
 ```bash
-python traceui_cli.py capture list-packages
-python traceui_cli.py capture list-packages --device <serial>
+traceui_cli capture list-packages
+traceui_cli capture list-packages --device <serial>
 ```
 
 Generate a sample config file:
 
 ```bash
-python traceui_cli.py capture sample-config
-python traceui_cli.py capture sample-config -o config.json
+traceui_cli capture sample-config
+traceui_cli capture sample-config -o config.json
 ```
 
 Arm capture:
 
 ```bash
-python traceui_cli.py capture setup \
-  --plugin gfxreconstruct \
+traceui_cli capture setup \
+  --plugin gfxr \
   --app com.example.game \
   -c config.json \
   --launch-app \
@@ -87,7 +93,7 @@ python traceui_cli.py capture setup \
 
 Notes:
 
-* `--plugin` is required for `capture setup` and must be `gfxreconstruct` or `patrace`.
+* `--plugin` is required for `capture setup` and must be `gfxr` or `patrace`.
 * `--app` accepts either the exact package name or a resolvable app name.
 * `--launch-app` launches the app after trace setup completes.
 * `-c` and `--config` are equivalent. If omitted, the plugin uses its current defaults.
@@ -97,9 +103,9 @@ Notes:
 Stop capture and pull the trace:
 
 ```bash
-python traceui_cli.py capture stop
-python traceui_cli.py capture stop --app com.example.game
-python traceui_cli.py capture stop --pull-to tmp/output_traces
+traceui_cli capture stop
+traceui_cli capture stop --app com.example.game
+traceui_cli capture stop --pull-to tmp/output_traces
 ```
 
 ### Replay Command
@@ -107,8 +113,8 @@ python traceui_cli.py capture stop --pull-to tmp/output_traces
 Replay a local trace:
 
 ```bash
-python traceui_cli.py replay \
-  -t tmp/example.gfxr \
+traceui_cli replay \
+  tmp/example.gfxr \
   -c config.json \
   --screenshots \
   --interval 10 \
@@ -118,13 +124,36 @@ python traceui_cli.py replay \
 
 Notes:
 
-* `--plugin` defaults to `auto` and is resolved from the trace suffix.
-* `-t` and `--trace` are equivalent.
+* The trace path is a required positional argument.
+* The replay plugin is resolved automatically from the trace suffix.
 * `-c` and `--config` are equivalent and are used to apply config-driven device path overrides before replay starts.
 * `devicepaths.replay` from the config controls where the trace is pushed on the Android device.
 * `--screenshots` enables screenshot capture during replay.
 * `--interval` controls screenshot interval when screenshots are enabled.
 * `-o` and `--outdir` are equivalent.
+
+### Fastforward Command
+
+Generate a fast-forwarded trace from a local source trace:
+
+```bash
+traceui_cli fastforward \
+  tmp/example.gfxr \
+  -sf 1550 \
+  -c config.json \
+  -o tmp/fastforward-output \
+  --loglevel info
+```
+
+Notes:
+
+* `--plugin` defaults to `auto`; if you override it, use `gfxr` or `patrace`.
+* The trace path is a required positional argument.
+* `-c` and `--config` are equivalent and are used to apply config-driven device path overrides before fast-forward generation starts.
+* `-sf` and `--start-frame` are equivalent and required.
+* `-ef` and `--end-frame` are equivalent and optional. If omitted, the generated fast-forward trace runs to the end of the source trace.
+* `-o` and `--outdir` are equivalent.
+* The CLI fastforward command currently generates and pulls the fast-forward trace; screenshot/HWC verification remains GUI-only.
 
 ## Capture/Replay Config File
 

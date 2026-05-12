@@ -4,6 +4,8 @@ import argparse
 import importlib
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
@@ -20,7 +22,13 @@ REPO_ROOT = Path(__file__).resolve().parent
 PLUGINS_PATH = REPO_ROOT / "plugins"
 DEFAULT_SESSION_FILE = REPO_ROOT / "tmp" / "traceui_cli_capture_session.json"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "tmp"
-CAPTURE_PLUGIN_CHOICES = ("gfxreconstruct", "patrace")
+CLI_PLUGIN_ALIASES = {
+    "gfxr": "gfxreconstruct",
+    "patrace": "patrace",
+    "auto": "auto",
+}
+CAPTURE_PLUGIN_CHOICES = ("gfxr", "patrace")
+REPLAYER_PLUGIN_CHOICES = ("auto", "gfxr", "patrace")
 
 
 class CLIError(RuntimeError):
@@ -75,6 +83,12 @@ def load_plugins(adb):
     return plugins
 
 
+def normalize_cli_plugin_name(plugin_name):
+    if plugin_name is None:
+        return None
+    return CLI_PLUGIN_ALIASES.get(plugin_name, plugin_name)
+
+
 def build_capture_sample_config(plugins):
     sample_config = {
         "devicepaths": {},
@@ -109,6 +123,7 @@ def build_capture_sample_config(plugins):
 
 
 def resolve_plugin(plugins, plugin_name=None, trace_path=None):
+    plugin_name = normalize_cli_plugin_name(plugin_name)
     if plugin_name and plugin_name != "auto":
         if plugin_name not in plugins:
             raise CLIError(f"Unknown plugin '{plugin_name}'. Available: {sorted(plugins.keys())}")
@@ -225,6 +240,69 @@ def apply_plugin_config(plugin, config_path):
         raise CLIError(f"Invalid config file: {exc}")
 
 
+def validate_local_trace(trace_path):
+    trace_path = Path(trace_path)
+    if not trace_path.is_file():
+        raise CLIError(f"Trace file not found: {trace_path}")
+    if trace_path.stat().st_size == 0:
+        raise CLIError(f"Trace file is empty: {trace_path}")
+    return trace_path
+
+
+def prepare_remote_trace(adb, plugin, trace_path):
+    trace_path = validate_local_trace(trace_path)
+    remote_trace = plugin.sdcard_working_dir / trace_path.name
+    adb.command(["mkdir", "-p", str(plugin.sdcard_working_dir)], True)
+    adb.delete_file(remote_trace)
+    if not adb.push(str(trace_path), str(plugin.sdcard_working_dir), track=False):
+        raise CLIError(f"Failed to push trace to device: {trace_path}")
+    return trace_path, remote_trace
+
+
+def cleanup_replay_artifacts(adb, plugin, trace_on_device, screenshots):
+    if not screenshots:
+        return
+    dir_prefix = f"{Path(trace_on_device).stem}_screenshot"
+    screenshot_dir = plugin.sdcard_working_dir / dir_prefix
+    adb.command(["rm", "-rf", str(screenshot_dir)], True)
+
+
+def _ensure_remote_file_exists(adb, remote_path, description):
+    _, ls_error = adb.command(["ls", str(remote_path)], errors_handled_externally=True)
+    if ls_error:
+        raise CLIError(f"{description} was not created on device: {remote_path}")
+
+
+def collect_fastforward_output(adb, plugin, remote_output, outdir):
+    outdir = Path(outdir)
+    _ensure_dir(outdir)
+    _ensure_remote_file_exists(adb, remote_output, "Fast-forward trace")
+
+    if plugin.plugin_name == "gfxreconstruct":
+        staging_dir = DEFAULT_OUTPUT_DIR
+        _ensure_dir(staging_dir)
+        if not adb.pull(str(remote_output), str(staging_dir)):
+            raise CLIError(f"Failed to pull fast-forward trace from device: {remote_output}")
+        staged_trace = staging_dir / Path(remote_output).name
+        optimized_trace = plugin.optimize_trace(str(staged_trace))
+        if optimized_trace is None:
+            final_local_path = outdir / staged_trace.name
+            if staged_trace.resolve() != final_local_path.resolve():
+                shutil.copy2(staged_trace, final_local_path)
+            return final_local_path
+
+        optimized_trace = Path(optimized_trace)
+        final_local_path = outdir / optimized_trace.name
+        if optimized_trace.resolve() != final_local_path.resolve():
+            shutil.move(str(optimized_trace), str(final_local_path))
+        return final_local_path
+
+    final_local_path = outdir / Path(remote_output).name
+    if not adb.pull(str(remote_output), str(outdir)):
+        raise CLIError(f"Failed to pull fast-forward trace from device: {remote_output}")
+    return final_local_path
+
+
 def save_capture_session(session_path, data):
     session_path = Path(session_path)
     _ensure_dir(session_path.parent)
@@ -280,6 +358,14 @@ def _get_screenshot_paths(adb, base_dir, prefix):
     return [f"{base_dir}/{item}" for item in paths.split()]
 
 
+def _extract_patrace_frame_num(remote_path):
+    frame_suffix = Path(remote_path).stem.split("frame_", 1)[-1]
+    match = re.match(r"(\d+)(?:_|$)", frame_suffix)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
 def collect_replay_outputs(adb, plugin, trace_on_device, screenshots, interval, outdir):
     results = {"screenshots": []}
     outdir = Path(outdir)
@@ -292,8 +378,14 @@ def collect_replay_outputs(adb, plugin, trace_on_device, screenshots, interval, 
         screenshot_paths = _get_screenshot_paths(adb, screenshot_dir, screenshot_prefix)
         if plugin.plugin_name == "patrace":
             for remote_path in screenshot_paths:
-                frame_num = remote_path.split("frame_")[-1].split("_")[0]
-                adb.command([f"mv {remote_path} {screenshot_dir}/{screenshot_prefix}{int(frame_num)}.png"], True)
+                frame_num = _extract_patrace_frame_num(remote_path)
+                if frame_num is None:
+                    logger.warning("Skipping unexpected patrace screenshot name: %s", remote_path)
+                    continue
+                normalized_path = f"{screenshot_dir}/{screenshot_prefix}{frame_num}.png"
+                if remote_path == normalized_path:
+                    continue
+                adb.command([f"mv {remote_path} {normalized_path}"], True)
             screenshot_paths = _get_screenshot_paths(adb, screenshot_dir, screenshot_prefix)
         for remote_path in screenshot_paths:
             if not adb.pull(remote_path, str(outdir)):
@@ -417,13 +509,9 @@ def handle_replay(args):
     configure_command_loglevel(args.loglevel)
     adb = init_adb(args.device)
     plugins = load_plugins(adb)
-    trace_path = Path(args.trace)
-    if not trace_path.is_file():
-        raise CLIError(f"Trace file not found: {trace_path}")
-    if trace_path.stat().st_size == 0:
-        raise CLIError(f"Trace file is empty: {trace_path}")
+    trace_path = validate_local_trace(args.trace)
 
-    plugin = resolve_plugin(plugins, args.plugin, trace_path)
+    plugin = resolve_plugin(plugins, trace_path=trace_path)
     plugin.adb = adb
     if args.config:
         apply_plugin_config(plugin, args.config)
@@ -432,17 +520,14 @@ def handle_replay(args):
     if args.interval < 0:
         raise CLIError("Screenshot interval must be >= 0.")
 
-    remote_trace = plugin.sdcard_working_dir / trace_path.name
-    adb.command(["mkdir", "-p", str(plugin.sdcard_working_dir)], True)
-    adb.delete_file(remote_trace)
-    if not adb.push(str(trace_path), str(plugin.sdcard_working_dir), track=False):
-        raise CLIError(f"Failed to push trace to device: {trace_path}")
+    _, remote_trace = prepare_remote_trace(adb, plugin, trace_path)
 
     _print(f"Using device: {adb.device}")
     _print(f"Using plugin: {plugin.plugin_name}")
     _print(f"Trace on device: {remote_trace}")
 
     adb.clear_logcat()
+    cleanup_replay_artifacts(adb, plugin, remote_trace, args.screenshots)
     plugin.replay_setup()
     screenshots_mode = "interval" if args.screenshots else False
     cmd, data = plugin.replay_start(
@@ -471,6 +556,66 @@ def handle_replay(args):
 
     if err_lines:
         _print_error_lines("Replay reported errors:", err_lines)
+        return 1
+
+    return 0
+
+
+def handle_fastforward(args):
+    configure_command_loglevel(args.loglevel)
+    if args.start_frame < 0:
+        raise CLIError("Fast-forward start frame must be >= 0.")
+    if args.end_frame is not None and args.end_frame < args.start_frame:
+        raise CLIError("Fast-forward end frame must be >= start frame.")
+
+    adb = init_adb(args.device)
+    plugins = load_plugins(adb)
+    trace_path = validate_local_trace(args.trace)
+    plugin = resolve_plugin(plugins, args.plugin, trace_path)
+    plugin.adb = adb
+    if args.config:
+        apply_plugin_config(plugin, args.config)
+
+    fastforward_plugin = plugins.get("fastforward")
+    if fastforward_plugin is None or not hasattr(fastforward_plugin, "replay_start_fastforward"):
+        raise CLIError("Fastforward plugin is not available.")
+    fastforward_plugin.adb = adb
+
+    outdir = Path(args.outdir or DEFAULT_OUTPUT_DIR)
+    _ensure_dir(outdir)
+    _, remote_trace = prepare_remote_trace(adb, plugin, trace_path)
+
+    _print(f"Using device: {adb.device}")
+    _print(f"Using plugin: {plugin.plugin_name}")
+    _print(f"Trace on device: {remote_trace}")
+    _print(f"Generating fast-forward trace from frame: {args.start_frame}")
+
+    adb.clear_logcat()
+    plugin.replay_setup()
+
+    remote_output = None
+    local_output = None
+    try:
+        cmd, remote_output = fastforward_plugin.replay_start_fastforward(
+            remote_trace,
+            plugin,
+            from_frame=args.start_frame,
+            to_frame=args.end_frame,
+        )
+        if cmd is None or remote_output is None:
+            raise CLIError("Fast-forward setup failed before launch.")
+
+        start_replay_process(adb, plugin, cmd)
+        local_output = collect_fastforward_output(adb, plugin, remote_output, outdir)
+        err_lines = plugin.parse_logcat(mode="replay")
+    finally:
+        plugin.replay_reset_device()
+
+    if local_output is not None:
+        _print(f"Fast-forward trace saved to: {local_output}")
+
+    if err_lines:
+        _print_error_lines("Fast-forward reported errors:", err_lines)
         return 1
 
     return 0
@@ -537,8 +682,7 @@ def build_parser():
     capture_sample_config.set_defaults(handler=handle_capture_sample_config)
 
     replay_parser = subparsers.add_parser("replay")
-    replay_parser.add_argument("-t", "--trace", required=True, type=Path, help="Local trace path.")
-    replay_parser.add_argument("--plugin", default="auto", help="Plugin name or 'auto'.")
+    replay_parser.add_argument("trace", type=Path, help="Local trace path.")
     replay_parser.add_argument("--device", help="ADB device serial.")
     replay_parser.add_argument("-c", "--config", type=Path, help="Config JSON used to override device paths.")
     replay_parser.add_argument(
@@ -550,6 +694,32 @@ def build_parser():
     replay_parser.add_argument("--interval", type=int, default=10, help="Screenshot interval; 0 disables capture within screenshot mode.")
     replay_parser.add_argument("-o", "--outdir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Local output directory.")
     replay_parser.set_defaults(handler=handle_replay)
+
+    fastforward_parser = subparsers.add_parser("fastforward")
+    fastforward_parser.add_argument("trace", type=Path, help="Local trace path.")
+    fastforward_parser.add_argument("--plugin", default="auto", choices=REPLAYER_PLUGIN_CHOICES, help="Plugin name or 'auto'.")
+    fastforward_parser.add_argument("--device", help="ADB device serial.")
+    fastforward_parser.add_argument("-c", "--config", type=Path, help="Config JSON used to override device paths.")
+    fastforward_parser.add_argument(
+        "--loglevel",
+        choices=("debug", "info", "warning", "error", "critical"),
+        help="Override CLI/plugin log level for this command.",
+    )
+    fastforward_parser.add_argument(
+        "-sf",
+        "--start-frame",
+        required=True,
+        type=int,
+        help="First frame to keep in the fast-forward trace.",
+    )
+    fastforward_parser.add_argument(
+        "-ef",
+        "--end-frame",
+        type=int,
+        help="Optional last frame to keep; omit to run to the end.",
+    )
+    fastforward_parser.add_argument("-o", "--outdir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Local output directory.")
+    fastforward_parser.set_defaults(handler=handle_fastforward)
 
     return parser
 

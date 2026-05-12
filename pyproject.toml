@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "traceui"
+version = "0.0.0"
+description = "Trace UI CLI and GUI tooling for Android graphics traces"
+requires-python = ">=3.8"
+
+[project.scripts]
+traceui_cli = "traceui_cli:main"
+
+[tool.setuptools]
+py-modules = ["traceui_cli", "traceui", "gui", "adblib"]
+
+[tool.setuptools.packages.find]
+include = ["core*", "plugins*"]
+namespaces = true
