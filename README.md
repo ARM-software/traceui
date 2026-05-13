@@ -10,23 +10,19 @@ Trace UI is a Python application for capturing, replaying, and post-processing A
 
 ## Installation
 
-Requires Python 3.6 or newer.
+Requirements:
 
-If running outside a virtual environment:
+* Python 3.6 or newer.
+* `adb` in `PATH` for Android capture and replay commands.
+* A connected Android device for capture and replay flows.
 
 ```bash
-sudo -H pip install pandas pyside6==6.7.0
 git clone ...
 cd traceui
-```
-
-If using a virtual environment:
-
-```bash
 pip install pandas pyside6==6.7.0
-git clone ...
-cd traceui
 ```
+
+If you are not using a virtual environment, run the install command with `sudo -H`.
 
 To run fast-forward verification, ensure ImageMagick is installed:
 
@@ -39,10 +35,12 @@ apt install imagemagick
 Linux:
 
 ```bash
-./run.sh [--loglevel info|debug|warning|error]
+./run.sh [--loglevel debug|info|warning|error|critical]
 ```
 
 This checks for updates and then launches the GUI.
+
+Use `./run.sh` for normal use and `python traceui.py` for local development.
 
 For local development without the updater:
 
@@ -80,7 +78,9 @@ traceui_cli capture sample-config
 traceui_cli capture sample-config -o config.json
 ```
 
-Arm capture:
+See [Capture/Replay Config File](#capturereplay-config-file) for the sample config structure and field meanings.
+
+Trace capture:
 
 ```bash
 traceui_cli capture setup \
@@ -94,11 +94,15 @@ traceui_cli capture setup \
 Notes:
 
 * `--plugin` is required for `capture setup` and must be `gfxr` or `patrace`.
+* `gfxr` captures produce `.gfxr` trace files and `patrace` captures produce `.pat` trace files.
 * `--app` accepts either the exact package name or a resolvable app name.
 * `--launch-app` launches the app after trace setup completes.
 * `-c` and `--config` are equivalent. If omitted, the plugin uses its current defaults.
-* `--loglevel` is supported on `capture setup` and accepts `debug`, `info`, `warning`, `error`, or `critical`.
+* `capture setup` writes a capture session state JSON file that `capture stop` uses to recover the selected plugin, device, target app, and plugin-specific capture state.
+* By default, the session state file is written to `tmp/traceui_cli_capture_session.json`.
+* `--state-file` is optional and mainly useful for keeping separate capture sessions, for example when tracing on multiple devices in parallel.
 * `capture stop` uses the stored session state and does not take `--plugin`.
+* `capture stop` removes the session state file after a successful trace pull.
 
 Stop capture and pull the trace:
 
@@ -117,7 +121,6 @@ traceui_cli replay \
   tmp/example.gfxr \
   -c config.json \
   --screenshots \
-  --interval 10 \
   -o tmp/replay-output \
   --loglevel info
 ```
@@ -129,7 +132,8 @@ Notes:
 * `-c` and `--config` are equivalent and are used to apply config-driven device path overrides before replay starts.
 * `devicepaths.replay` from the config controls where the trace is pushed on the Android device.
 * `--screenshots` enables screenshot capture during replay.
-* `--interval` controls screenshot interval when screenshots are enabled.
+* `--interval` is optional. When omitted, the screenshot interval defaults to `10`.
+* Setting `--interval` to `0` disables screenshot capture.
 * `-o` and `--outdir` are equivalent.
 
 ### Fastforward Command
@@ -155,7 +159,7 @@ Notes:
 * `-o` and `--outdir` are equivalent.
 * The CLI fastforward command currently generates and pulls the fast-forward trace; screenshot/HWC verification remains GUI-only.
 
-## Capture/Replay Config File
+### Capture/Replay Config File
 
 The CLI sample config contains shared `devicepaths` and per-plugin config under `plugin`.
 
@@ -203,9 +207,9 @@ For `gfxreconstruct`:
 
 ## Logging
 
-Logs are written to `traceui.log` in the repo root.
+Logs are written to timestamped files under `logs/` in the repo root, for example `logs/traceui_YYYY-MM-DD_HH-MM-SS.log`.
 
-CLI commands support:
+`./run.sh`, `capture setup`, `replay`, and `fastforward` support:
 
 ```bash
 --loglevel debug|info|warning|error|critical
