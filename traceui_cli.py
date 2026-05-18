@@ -395,6 +395,77 @@ def collect_replay_outputs(adb, plugin, trace_on_device, screenshots, interval, 
     return results
 
 
+def execute_replay_run(adb, plugin, remote_trace, outdir, screenshot_mode=False, interval=10, from_frame=None, to_frame=None):
+    adb.clear_logcat()
+    cleanup_replay_artifacts(adb, plugin, remote_trace, screenshot_mode)
+    plugin.replay_setup()
+    cmd, data = plugin.replay_start(
+        remote_trace,
+        screenshot=screenshot_mode,
+        interval=interval,
+        from_frame=from_frame,
+        to_frame=to_frame,
+        extra_args=list(getattr(plugin, "extra_args", [])),
+    )
+    if cmd is None:
+        raise CLIError("Replay setup failed before launching replay.")
+
+    if plugin.plugin_name == "patrace":
+        write_patrace_replay_args(adb, plugin, data)
+
+    try:
+        start_replay_process(adb, plugin, cmd)
+        results = collect_replay_outputs(adb, plugin, remote_trace, screenshot_mode, interval, outdir)
+        err_lines = plugin.parse_logcat(mode="replay")
+    finally:
+        plugin.replay_reset_device()
+
+    return results, err_lines
+
+
+def stage_compared_frame(results, target_path, frame_number, run_label):
+    screenshots = results.get("screenshots", [])
+    if len(screenshots) != 1:
+        raise CLIError(
+            f"Expected exactly one screenshot for frame {frame_number} during {run_label}, found {len(screenshots)}."
+        )
+    source_path = Path(screenshots[0])
+    if not source_path.is_file():
+        raise CLIError(f"Replay screenshot missing for {run_label}: {source_path}")
+    _ensure_dir(target_path.parent)
+    shutil.move(str(source_path), str(target_path))
+    return target_path
+
+
+def compare_replay_frames(frame_number, first_image, second_image, diff_image):
+    compare_cmd = [
+        "compare",
+        "-alpha",
+        "off",
+        "-metric",
+        "RMSE",
+        str(first_image),
+        str(second_image),
+        str(diff_image),
+    ]
+    try:
+        process = subprocess.run(compare_cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise CLIError("ImageMagick 'compare' not found. Install ImageMagick to use --compare-frame.")
+
+    stderr = process.stderr.strip()
+    if "compare: not found" in stderr:
+        raise CLIError("ImageMagick 'compare' not found. Install ImageMagick to use --compare-frame.")
+    if process.returncode not in (0, 1):
+        detail = stderr or process.stdout.strip() or f"exit code {process.returncode}"
+        raise CLIError(f"Failed to compare frame {frame_number}: {detail}")
+
+    rmse = stderr.splitlines()[-1].strip() if stderr else "0"
+    first_token = rmse.split()[0] if rmse else "0"
+    frames_differ = first_token != "0"
+    return frames_differ, rmse
+
+
 def handle_capture_setup(args):
     configure_command_loglevel(args.loglevel)
     adb = init_adb(args.device)
@@ -421,7 +492,7 @@ def handle_capture_setup(args):
         "resolved_target": resolved_target,
         "requested_app": args.app,
         "config_path": str(args.config) if args.config else None,
-        "pull_to": str(DEFAULT_OUTPUT_DIR),
+        "outdir": str(DEFAULT_OUTPUT_DIR),
         "plugin_state": plugin.export_capture_session_state() if hasattr(plugin, "export_capture_session_state") else {},
     }
     save_capture_session(args.state_file, session_data)
@@ -461,20 +532,20 @@ def handle_capture_stop(args):
     if hasattr(plugin, "import_capture_session_state"):
         plugin.import_capture_session_state(session.get("plugin_state", {}))
 
-    pull_to = Path(args.pull_to or session.get("pull_to") or DEFAULT_OUTPUT_DIR)
-    _ensure_dir(pull_to)
+    outdir = Path(args.outdir or session.get("outdir") or DEFAULT_OUTPUT_DIR)
+    _ensure_dir(outdir)
     _print(f"Stopping capture for: {resolved_target}")
 
     remote_trace = None
     try:
         remote_trace = plugin.trace_stop(resolved_target)
         _ensure_capture_trace_exists(adb, plugin, resolved_target, remote_trace)
-        if not adb.pull(str(remote_trace), str(pull_to)):
+        if not adb.pull(str(remote_trace), str(outdir)):
             raise CLIError(f"Failed to pull trace from device: {remote_trace}")
     finally:
         plugin.trace_reset_device()
 
-    local_path = pull_to / Path(remote_trace).name
+    local_path = outdir / Path(remote_trace).name
     remove_capture_session(args.state_file)
     _print(f"Trace pulled to: {local_path}")
 
@@ -517,8 +588,13 @@ def handle_replay(args):
         apply_plugin_config(plugin, args.config)
     outdir = Path(args.outdir or DEFAULT_OUTPUT_DIR)
     _ensure_dir(outdir)
-    if args.interval < 0:
+    if args.interval is not None and args.interval < 0:
         raise CLIError("Screenshot interval must be >= 0.")
+    if args.compare_frame is not None:
+        if args.compare_frame < 0:
+            raise CLIError("Compare frame must be >= 0.")
+        if args.interval is not None:
+            raise CLIError("--interval cannot be used with --compare-frame.")
 
     _, remote_trace = prepare_remote_trace(adb, plugin, trace_path)
 
@@ -526,28 +602,65 @@ def handle_replay(args):
     _print(f"Using plugin: {plugin.plugin_name}")
     _print(f"Trace on device: {remote_trace}")
 
-    adb.clear_logcat()
-    cleanup_replay_artifacts(adb, plugin, remote_trace, args.screenshots)
-    plugin.replay_setup()
+    if args.compare_frame is not None:
+        compare_run1_dir = outdir / ".compare_run1"
+        compare_run2_dir = outdir / ".compare_run2"
+        compare_run1_image = outdir / f"compare_run1_frame_{args.compare_frame}.png"
+        compare_run2_image = outdir / f"compare_run2_frame_{args.compare_frame}.png"
+        diff_image = outdir / f"diff_frame_{args.compare_frame}.png"
+        try:
+            _print(f"Capturing frame {args.compare_frame} from replay run 1...")
+            run1_results, run1_errors = execute_replay_run(
+                adb,
+                plugin,
+                remote_trace,
+                compare_run1_dir,
+                screenshot_mode="selecting_frames",
+                from_frame=[args.compare_frame],
+            )
+            if run1_errors:
+                _print_error_lines("Replay reported errors on run 1:", run1_errors)
+                return 1
+
+            _print(f"Capturing frame {args.compare_frame} from replay run 2...")
+            run2_results, run2_errors = execute_replay_run(
+                adb,
+                plugin,
+                remote_trace,
+                compare_run2_dir,
+                screenshot_mode="selecting_frames",
+                from_frame=[args.compare_frame],
+            )
+            if run2_errors:
+                _print_error_lines("Replay reported errors on run 2:", run2_errors)
+                return 1
+
+            first_image = stage_compared_frame(run1_results, compare_run1_image, args.compare_frame, "run 1")
+            second_image = stage_compared_frame(run2_results, compare_run2_image, args.compare_frame, "run 2")
+            frames_differ, rmse = compare_replay_frames(args.compare_frame, first_image, second_image, diff_image)
+        finally:
+            shutil.rmtree(compare_run1_dir, ignore_errors=True)
+            shutil.rmtree(compare_run2_dir, ignore_errors=True)
+
+        _print(f"Run 1 frame saved to: {compare_run1_image}")
+        _print(f"Run 2 frame saved to: {compare_run2_image}")
+        _print(f"RMSE: {rmse}")
+        if frames_differ:
+            _print(f"Frame {args.compare_frame} differed between replay runs. Diff image: {diff_image}")
+        else:
+            _print(f"Frame {args.compare_frame} matched between replay runs. Diff image: {diff_image}")
+        return 0
+
     screenshots_mode = "interval" if args.screenshots else False
-    cmd, data = plugin.replay_start(
+    replay_interval = args.interval if args.interval is not None else 10
+    results, err_lines = execute_replay_run(
+        adb,
+        plugin,
         remote_trace,
-        screenshot=screenshots_mode,
-        interval=args.interval,
-        extra_args=list(getattr(plugin, "extra_args", [])),
+        outdir,
+        screenshot_mode=screenshots_mode,
+        interval=replay_interval,
     )
-    if cmd is None:
-        raise CLIError("Replay setup failed before launching replay.")
-
-    if plugin.plugin_name == "patrace":
-        write_patrace_replay_args(adb, plugin, data)
-
-    try:
-        start_replay_process(adb, plugin, cmd)
-        results = collect_replay_outputs(adb, plugin, remote_trace, args.screenshots, args.interval, outdir)
-        err_lines = plugin.parse_logcat(mode="replay")
-    finally:
-        plugin.replay_reset_device()
 
     if results["screenshots"]:
         _print(f"Pulled {len(results['screenshots'])} screenshot(s) to: {outdir}")
@@ -659,7 +772,7 @@ def build_parser():
     capture_stop = capture_subparsers.add_parser("stop")
     capture_stop.add_argument("--app", help="Optional package or app name for validation.")
     capture_stop.add_argument("--device", help="ADB device serial.")
-    capture_stop.add_argument("--pull-to", type=Path, default=DEFAULT_OUTPUT_DIR)
+    capture_stop.add_argument("-o", "--outdir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Local output directory.")
     capture_stop.add_argument(
         "--state-file",
         type=Path,
@@ -690,8 +803,19 @@ def build_parser():
         choices=("debug", "info", "warning", "error", "critical"),
         help="Override CLI/plugin log level for this command.",
     )
-    replay_parser.add_argument("--screenshots", action="store_true", help="Capture screenshots during replay.")
-    replay_parser.add_argument("--interval", type=int, default=10, help="Screenshot interval; 0 disables capture within screenshot mode.")
+    replay_capture_group = replay_parser.add_mutually_exclusive_group()
+    replay_capture_group.add_argument("--screenshots", action="store_true", help="Capture screenshots during replay.")
+    replay_capture_group.add_argument(
+        "--compare-frame",
+        type=int,
+        help="Replay twice, capture the requested frame once per run, and compare the two images.",
+    )
+    replay_parser.add_argument(
+        "--interval",
+        type=int,
+        default=None,
+        help="Screenshot interval when --screenshots is enabled; defaults to 10, and 0 disables capture within screenshot mode.",
+    )
     replay_parser.add_argument("-o", "--outdir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Local output directory.")
     replay_parser.set_defaults(handler=handle_replay)
 

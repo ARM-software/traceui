@@ -23,7 +23,6 @@ pip install pandas pyside6==6.7.0
 ```
 
 If you are not using a virtual environment, run the install command with `sudo -H`.
-
 To run fast-forward verification, ensure ImageMagick is installed:
 
 ```bash
@@ -109,7 +108,7 @@ Stop capture and pull the trace:
 ```bash
 traceui_cli capture stop
 traceui_cli capture stop --app com.example.game
-traceui_cli capture stop --pull-to tmp/output_traces
+traceui_cli capture stop -o tmp/output_traces
 ```
 
 ### Replay Command
@@ -132,9 +131,23 @@ Notes:
 * `-c` and `--config` are equivalent and are used to apply config-driven device path overrides before replay starts.
 * `devicepaths.replay` from the config controls where the trace is pushed on the Android device.
 * `--screenshots` enables screenshot capture during replay.
-* `--interval` is optional. When omitted, the screenshot interval defaults to `10`.
-* Setting `--interval` to `0` disables screenshot capture.
+* `--compare-frame FRAME` replays the trace twice, captures that frame once per run, and compares the two screenshots with ImageMagick.
+* `--compare-frame` and `--screenshots` are mutually exclusive.
+* `--interval` controls screenshot interval when `--screenshots` is enabled and cannot be used with `--compare-frame`. When omitted, the screenshot interval defaults to 10. Setting `--interval` to `0` disables screenshot capture.
 * `-o` and `--outdir` are equivalent.
+* Frame comparison writes `compare_run1_frame_<N>.png`, `compare_run2_frame_<N>.png`, and `diff_frame_<N>.png` to `outdir`.
+* A visual diff is reported in command output but still exits successfully; operational failures still exit nonzero.
+
+Compare a single frame between two replay runs:
+
+```bash
+traceui_cli replay \
+  tmp/example.gfxr \
+  --compare-frame 1550 \
+  -c config.json \
+  -o tmp/replay-output \
+  --loglevel info
+```
 
 ### Fastforward Command
 
